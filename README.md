@@ -2,6 +2,8 @@
 
 iTerm2 + zsh 환경에서 Claude Code를 여러 세션으로 독립적으로 실행하기 위한 tmux 래퍼입니다.
 
+> **macOS 전용** — macOS + iTerm2 + zsh 환경을 기준으로 개발 및 검증되었습니다.
+
 ## 문제
 
 Claude Code는 동일 디렉토리에서 새 인스턴스를 실행하면 기존 인스턴스와 충돌합니다. 또한 `~/.claude.json` 등 공유 설정 파일에 대한 동시 쓰기 보호가 없어 파일 손상이 발생할 수 있습니다.
@@ -27,9 +29,24 @@ echo '\nsource ~/Desktop/Git/clau-mux/clmux.zsh' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-**3. tmux 테마 적용 (선택)**
+**3. tmux 설정 적용 (선택)**
 
-`~/.tmux.conf`에 [tmux 테마 설정](#tmux-테마) 내용을 추가합니다.
+저장소에 포함된 `tmux.conf`를 한 줄로 적용합니다.
+
+```bash
+# 기존 ~/.tmux.conf에 추가
+cat ~/Desktop/Git/clau-mux/tmux.conf >> ~/.tmux.conf
+
+# 즉시 반영
+tmux source ~/.tmux.conf
+```
+
+`~/.tmux.conf`가 없는 경우:
+
+```bash
+cp ~/Desktop/Git/clau-mux/tmux.conf ~/.tmux.conf
+tmux source ~/.tmux.conf
+```
 
 ## 사용법
 
@@ -134,46 +151,19 @@ orange  dark gray  background
 
 > Powerline 구분자(``)를 사용합니다. [Nerd Font](https://www.nerdfonts.com/) 설치 필요.
 
-**`~/.tmux.conf`**
+**`tmux.conf`**
 
-```bash
-# ─── 기본 설정 ───────────────────────────────────────────
-set -g default-terminal "tmux-256color"
-set -ga terminal-overrides ",xterm-256color:RGB"
-set -g base-index 1
-setw -g pane-base-index 1
-setw -g automatic-rename off
-setw -g allow-rename off
-set -g escape-time 0
-set -g mouse on
+전체 설정은 저장소의 [`tmux.conf`](tmux.conf)를 참고하세요. 설치 방법은 [위의 설치 섹션](#3-tmux-설정-적용-선택)을 따르세요.
 
-# ─── Status bar ──────────────────────────────────────────
-set -g status-position bottom
-set -g status-style "fg=#b0aea5,bg=#141413"
+**마우스 토글**
 
-# session  folder  branch
-# branch (#W) is updated via zsh precmd hook in clmux.zsh — no polling needed
-set -g status-left-length 80
-set -g status-left "#[fg=#141413,bg=#d97757,bold] #S #[fg=#d97757,bg=#2a2928,nobold]#[fg=#faf9f5,bg=#2a2928] #{b:pane_current_path} #[fg=#2a2928,bg=#141413]#[fg=#6e6c68] #W  "
+`ctrl+x`로 마우스 모드를 즉시 켜고 끌 수 있습니다. 상태바에 현재 상태가 표시됩니다.
 
-set -g status-right-length 30
-set -g status-right "#[fg=#4a4845] %m/%d  #[fg=#b0aea5,bold]%H:%M "
-
-# ─── Window tabs ─────────────────────────────────────────
-# clmux enforces 1 window per session, but tmux shows tabs by default.
-# explicitly clear formats to suppress the window index from appearing.
-set -g window-status-format ""
-set -g window-status-current-format ""
-set -g window-status-separator ""
-
-# ─── Pane border ─────────────────────────────────────────
-set -g pane-border-style "fg=#2a2928"
-set -g pane-active-border-style "fg=#d97757"
-
-# ─── Message / Command prompt ────────────────────────────
-set -g message-style "fg=#141413,bg=#d97757,bold"
-set -g message-command-style "fg=#faf9f5,bg=#2a2928"
 ```
+Mouse: ON   ← ctrl+x →   Mouse: OFF
+```
+
+터미널에서 텍스트를 복사할 때 마우스 모드를 잠깐 끄거나, 스크롤 동작을 전환할 때 유용합니다.
 
 **적용**
 
@@ -295,6 +285,7 @@ clmux -n test
 
 ## 요구사항
 
+- macOS
 - zsh
 - tmux
 - Claude Code CLI (`claude`)

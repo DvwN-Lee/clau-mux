@@ -19,13 +19,13 @@ Claude Code는 동일 디렉토리에서 새 인스턴스를 실행하면 기존
 **1. 저장소 클론**
 
 ```bash
-git clone https://github.com/DvwN-Lee/clau-mux.git ~/Desktop/Git/clau-mux
+git clone https://github.com/DvwN-Lee/clau-mux.git ~/clau-mux
 ```
 
 **2. zshrc에 추가**
 
 ```bash
-echo '\nsource ~/Desktop/Git/clau-mux/clmux.zsh' >> ~/.zshrc
+echo '\nsource ~/clau-mux/clmux.zsh' >> ~/.zshrc
 source ~/.zshrc
 ```
 
@@ -34,7 +34,7 @@ source ~/.zshrc
 ```bash
 # 기존 ~/.tmux.conf에 추가
 # 주의: 기존 설정과 base-index, pane-base-index 값이 충돌하지 않는지 확인하세요.
-cat ~/Desktop/Git/clau-mux/tmux.conf >> ~/.tmux.conf
+cat ~/clau-mux/tmux.conf >> ~/.tmux.conf
 
 # 즉시 반영
 tmux source ~/.tmux.conf
@@ -43,7 +43,7 @@ tmux source ~/.tmux.conf
 `~/.tmux.conf`가 없는 경우:
 
 ```bash
-cp ~/Desktop/Git/clau-mux/tmux.conf ~/.tmux.conf
+cp ~/clau-mux/tmux.conf ~/.tmux.conf
 tmux source ~/.tmux.conf
 ```
 
@@ -283,7 +283,7 @@ type _clmux_precmd
 grep "clau-mux" ~/.zshrc
 
 # 현재 shell에 즉시 적용
-source ~/Desktop/Git/clau-mux/clmux.zsh
+source ~/clau-mux/clmux.zsh
 ```
 
 ---
@@ -295,7 +295,7 @@ source ~/Desktop/Git/clau-mux/clmux.zsh
 tmux kill-server
 
 # 2. clmux 함수 재로드
-source ~/Desktop/Git/clau-mux/clmux.zsh
+source ~/clau-mux/clmux.zsh
 
 # 3. 정상 동작 확인
 clmux -n test

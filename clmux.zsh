@@ -57,15 +57,16 @@ clmux() {
   branch=$(git symbolic-ref --short HEAD 2>/dev/null || basename "$PWD")
 
   # 기존 세션 처리
-  if tmux has-session -t "$session_name" 2>/dev/null; then
-    local pane_dead
-    pane_dead=$(tmux list-panes -t "$session_name" -F '#{pane_dead}' 2>/dev/null | head -1)
-    if [[ "$pane_dead" == "1" ]]; then
-      # 좀비 세션 → 자동 정리 후 재생성
-      echo "[$session_name] restarting stale session."
-      tmux kill-session -t "$session_name"
+  if tmux has-session -t "=$session_name" 2>/dev/null; then
+    local attached_clients
+    attached_clients=$(tmux list-clients -t "=$session_name" 2>/dev/null | wc -l | tr -d ' ')
+
+    if [[ "$attached_clients" -eq 0 ]]; then
+      # 클라이언트 없음 → orphaned 세션 → 정리 후 재생성
+      echo "[$session_name] restarting orphaned session."
+      tmux kill-session -t "=$session_name" 2>/dev/null
     else
-      # 라이브 세션 → 새 접근 차단 (멀티 인스턴스 충돌 방지)
+      # 활성 클라이언트 존재 → 새 접근 차단 (멀티 인스턴스 충돌 방지)
       echo "error: [$session_name] session is already running." >&2
       echo "  kill with: tmux kill-session -t $session_name" >&2
       return 1
@@ -77,10 +78,47 @@ clmux() {
     echo "error: failed to create tmux session '$session_name'." >&2
     return 1
   fi
-  tmux attach-session -t "$session_name"
+  tmux attach-session -t "=$session_name"
 }
 
-alias clmux-ls='tmux ls 2>/dev/null || echo "no active sessions"'
+clmux-ls() {
+  local sessions
+  sessions=$(tmux ls 2>/dev/null) || { echo "no active sessions"; return; }
+  echo "$sessions"
+  # orphaned 세션 경고 (attached 클라이언트 없는 세션)
+  local orphaned=0
+  local sess_name
+  while IFS= read -r sess_name; do
+    local client_count
+    client_count=$(tmux list-clients -t "=$sess_name" 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "$client_count" -eq 0 ]]; then
+      (( orphaned += 1 ))
+    fi
+  done < <(tmux ls -F '#{session_name}' 2>/dev/null)
+  if [[ "$orphaned" -gt 0 ]]; then
+    echo ""
+    echo "warning: $orphaned orphaned session(s) detected. run clmux-cleanup to remove."
+  fi
+}
+
+clmux-cleanup() {
+  local count=0
+  local sess_name
+  while IFS= read -r sess_name; do
+    local client_count
+    client_count=$(tmux list-clients -t "=$sess_name" 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "$client_count" -eq 0 ]]; then
+      if tmux kill-session -t "=$sess_name" 2>/dev/null; then
+        (( count += 1 ))
+      fi
+    fi
+  done < <(tmux ls -F '#{session_name}' 2>/dev/null)
+  if [[ "$count" -eq 0 ]]; then
+    echo "no orphaned sessions."
+  else
+    echo "removed $count orphaned session(s)."
+  fi
+}
 
 # update tmux window name to current git branch after each command
 _clmux_precmd() {

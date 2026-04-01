@@ -1,3 +1,5 @@
+CLMUX_DIR="${${(%):-%x}:A:h}"
+
 clmux() {
   # 전제조건 검증
   if ! command -v tmux &>/dev/null; then
@@ -78,6 +80,21 @@ clmux() {
     echo "error: failed to create tmux session '$session_name'." >&2
     return 1
   fi
+
+  # status bar model monitor: JSONL에서 모델명 추출 → tmux @clmux_model에 저장
+  (
+    projdir="$HOME/.claude/projects/-$(printf '%s' "$PWD" | sed 's|/|-|g')"
+    while tmux has-session -t "=$session_name" 2>/dev/null; do
+      f=$(ls -1t "$projdir"/*.jsonl 2>/dev/null | head -1)
+      if [[ -n "$f" ]]; then
+        m=$(tail -c 5000 "$f" 2>/dev/null | grep -oE '"model":"claude-[^"]*"' | tail -1 | sed 's/.*claude-//;s/"//;s/-[0-9].*//')
+        [[ -n "$m" ]] && tmux set -t "$session_name" @clmux_model "$m" 2>/dev/null
+      fi
+      sleep 30
+    done
+  ) &>/dev/null &
+  disown
+
   tmux attach-session -t "=$session_name"
 }
 
@@ -117,6 +134,147 @@ clmux-cleanup() {
     echo "no orphaned sessions."
   else
     echo "removed $count orphaned session(s)."
+  fi
+}
+
+clmux-gemini() {
+  # Spawns a Gemini CLI tmux pane as a Claude Code teammate.
+  # Usage: clmux-gemini -t <team_name> [-n <agent_name>] [-c <color>] [-x <timeout_sec>]
+  #   -t  team name (matches ~/.claude/teams/<team_name>/)
+  #   -n  agent name used in messages          (default: gemini-worker)
+  #   -c  tmux pane fg color                   (default: cyan)
+  #   -x  bridge response timeout in seconds   (default: 120)
+
+  [[ -z "$TMUX" ]] && { echo "error: clmux-gemini must be run inside a tmux session" >&2; return 1; }
+  command -v gemini &>/dev/null || { echo "error: gemini CLI not found in PATH" >&2; return 1; }
+
+  local team_name="" agent_name="gemini-worker" color="cyan" timeout=120
+  local OPTIND=1
+  while getopts "t:n:c:x:" opt; do
+    case $opt in
+      t) team_name="$OPTARG" ;;
+      n) agent_name="$OPTARG" ;;
+      c) color="$OPTARG" ;;
+      x) timeout="$OPTARG" ;;
+      *) echo "Usage: clmux-gemini -t <team_name> [-n <name>] [-c <color>] [-x <timeout>]" >&2; return 1 ;;
+    esac
+  done
+
+  [[ -z "$team_name" ]] && { echo "error: -t <team_name> required" >&2; return 1; }
+
+  local team_dir="$HOME/.claude/teams/$team_name"
+  [[ ! -d "$team_dir" ]] && { echo "error: team '$team_name' not found at $team_dir" >&2; return 1; }
+
+  local inbox_dir="$team_dir/inboxes"
+  local inbox="$inbox_dir/$agent_name.json"
+  local outbox="$inbox_dir/team-lead.json"
+  local pid_file="$team_dir/.${agent_name}-bridge.pid"
+  local pane_file="$team_dir/.${agent_name}-pane"
+
+  mkdir -p "$inbox_dir"
+  [[ ! -f "$inbox" ]]  && echo '[]' > "$inbox"
+  [[ ! -f "$outbox" ]] && echo '[]' > "$outbox"
+
+  local lead_pane
+  lead_pane=$(tmux display-message -p '#{pane_id}')
+
+  # Spawn Gemini pane to the right (70% width)
+  local gemini_pane
+  gemini_pane=$(tmux split-window -h -l 70% -P -F '#{pane_id}' "exec gemini")
+
+  # Style the Gemini pane
+  tmux select-pane -t "$gemini_pane" -P "fg=$color"
+  tmux select-pane -t "$gemini_pane" -T "$agent_name"
+  tmux set-option pane-border-status top
+  tmux set-option pane-border-format ' #{pane_title} '
+
+  # Ensure lead stays at 30%
+  tmux resize-pane -t "$lead_pane" -x 30%
+
+  # Return focus to lead pane
+  tmux select-pane -t "$lead_pane"
+
+  # Persist pane ID for stop command
+  echo "$gemini_pane" > "$pane_file"
+
+  # Update team config.json with the live pane ID
+  cat > /tmp/clmux_update_pane.py << 'PYEOF'
+import json, sys, time
+team_dir, agent_name, pane_id = sys.argv[1], sys.argv[2], sys.argv[3]
+cfg_path = f"{team_dir}/config.json"
+with open(cfg_path) as f:
+    cfg = json.load(f)
+team_name = cfg.get('name', team_dir.split('/')[-1])
+updated = False
+for m in cfg['members']:
+    if m.get('name') == agent_name or m.get('agentId', '').startswith(f'{agent_name}@'):
+        m['tmuxPaneId'] = pane_id
+        m['isActive'] = True
+        updated = True
+        break
+if not updated:
+    cfg['members'].append({
+        "agentId": f"{agent_name}@{team_name}",
+        "name": agent_name,
+        "model": "gemini",
+        "joinedAt": int(time.time() * 1000),
+        "tmuxPaneId": pane_id,
+        "cwd": ".",
+        "backendType": "tmux",
+        "isActive": True
+    })
+with open(cfg_path, 'w') as f:
+    json.dump(cfg, f, indent=2)
+PYEOF
+  python3 /tmp/clmux_update_pane.py "$team_dir" "$agent_name" "$gemini_pane"
+
+  # Start bridge in background
+  zsh "$CLMUX_DIR/gemini-bridge.zsh" \
+    -p "$gemini_pane" -i "$inbox" -o "$outbox" \
+    -n "$agent_name" -t "$timeout" \
+    >> "/tmp/gbridge-${agent_name}.log" 2>&1 &
+  echo $! > "$pid_file"
+  disown
+
+  echo "[clmux-gemini] $agent_name attached — pane:$gemini_pane  bridge PID:$(< "$pid_file")"
+}
+
+clmux-gemini-stop() {
+  # Stops the Gemini bridge and closes the Gemini pane.
+  # Usage: clmux-gemini-stop -t <team_name> [-n <agent_name>]
+
+  local team_name="" agent_name="gemini-worker"
+  local OPTIND=1
+  while getopts "t:n:" opt; do
+    case $opt in
+      t) team_name="$OPTARG" ;;
+      n) agent_name="$OPTARG" ;;
+      *) echo "Usage: clmux-gemini-stop -t <team_name> [-n <name>]" >&2; return 1 ;;
+    esac
+  done
+
+  [[ -z "$team_name" ]] && { echo "error: -t <team_name> required" >&2; return 1; }
+
+  local team_dir="$HOME/.claude/teams/$team_name"
+  local pid_file="$team_dir/.${agent_name}-bridge.pid"
+  local pane_file="$team_dir/.${agent_name}-pane"
+
+  if [[ -f "$pid_file" ]]; then
+    local pid
+    pid=$(< "$pid_file")
+    kill "$pid" 2>/dev/null && echo "[clmux-gemini-stop] bridge PID $pid stopped"
+    rm -f "$pid_file"
+  else
+    echo "[clmux-gemini-stop] no bridge PID found for $agent_name"
+  fi
+
+  if [[ -f "$pane_file" ]]; then
+    local pane_id
+    pane_id=$(< "$pane_file")
+    tmux kill-pane -t "$pane_id" 2>/dev/null && echo "[clmux-gemini-stop] pane $pane_id closed"
+    rm -f "$pane_file"
+  else
+    echo "[clmux-gemini-stop] no pane ID found for $agent_name"
   fi
 }
 

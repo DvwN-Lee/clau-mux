@@ -90,6 +90,30 @@ while true; do
 
     echo "[clmux-bridge] → from '$from': ${text:0:80}"
 
+    # Intercept shutdown_request before forwarding to pane
+    msg_type=$(python3 -c "
+import json,sys
+try:
+    d=json.loads(sys.argv[1]); print(d.get('type',''))
+except: print('')
+" "$text" 2>/dev/null)
+    if [[ "$msg_type" == "shutdown_request" ]]; then
+      echo "[clmux-bridge] shutdown_request received — terminating $AGENT_NAME" >&2
+      request_id=$(python3 -c "
+import json,sys
+try:
+    d=json.loads(sys.argv[1]); print(d.get('requestId',''))
+except: print('')
+" "$text" 2>/dev/null)
+      [[ -n "$ts" ]] && mark_read "$ts"
+      tmux kill-pane -t "$PANE_ID" 2>/dev/null
+      team_dir=$(dirname "$(dirname "$INBOX")")
+      python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME" "$request_id" 2>/dev/null
+      python3 "$CLMUX_DIR/scripts/deactivate_pane.py" "$team_dir" "$AGENT_NAME" 2>/dev/null
+      echo "[clmux-bridge] shutting down" >&2
+      exit 0
+    fi
+
     wait_for_idle || { echo "[clmux-bridge] warning: not idle before sending" >&2; }
 
     if [[ "$INPUT_METHOD" == "paste" ]]; then

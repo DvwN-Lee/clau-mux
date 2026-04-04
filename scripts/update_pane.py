@@ -1,4 +1,4 @@
-import json, sys, time
+import json, sys, time, tempfile, os
 team_dir, agent_name, pane_id, cli_cmd = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 cfg_path = f"{team_dir}/config.json"
 with open(cfg_path) as f:
@@ -22,5 +22,8 @@ if not updated:
         "backendType": "tmux",
         "isActive": True
     })
-with open(cfg_path, 'w') as f:
-    json.dump(cfg, f, indent=2)
+dir_ = os.path.dirname(os.path.abspath(cfg_path))
+with tempfile.NamedTemporaryFile(mode='w', dir=dir_, delete=False, suffix='.tmp') as tf:
+    json.dump(cfg, tf, indent=2)
+    tmp_name = tf.name
+os.replace(tmp_name, cfg_path)

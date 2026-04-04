@@ -11,7 +11,8 @@ tmux 외부
     └── 라이브 세션    →  오류 출력 + 차단 (멀티 인스턴스 충돌 방지)
 
 tmux 내부
-    └── 세션 관리 없이 command claude 바로 실행
+    ├── -g 플래그 있음  →  Gemini teammate 스폰 후 command claude 실행
+    └── -g 플래그 없음  →  세션 관리 없이 command claude 바로 실행
 ```
 
 ## 세션 생명주기

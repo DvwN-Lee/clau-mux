@@ -5,6 +5,15 @@ else
 fi
 export CLMUX_DIR
 
+# ── _clmux_ensure_team ────────────────────────────────────────────────────────
+# Ensures team directory and config.json exist. Idempotent.
+_clmux_ensure_team() {
+  local team_dir="$1" team_name="$2"
+  mkdir -p "$team_dir/inboxes"
+  if [[ ! -f "$team_dir/config.json" ]]; then
+    printf '{\n  "name": "%s",\n  "members": []\n}\n' "$team_name" > "$team_dir/config.json"
+  fi
+}
 
 clmux() {
   # 전제조건 검증
@@ -54,10 +63,7 @@ clmux() {
     if [[ "$gemini_flag" -eq 1 ]]; then
       local g_team="${gemini_team:-$(tmux display-message -p '#{session_name}')}"
       local g_team_dir="$HOME/.claude/teams/$g_team"
-      if [[ ! -d "$g_team_dir" ]]; then
-        mkdir -p "$g_team_dir/inboxes"
-        printf '{\n  "name": "%s",\n  "members": []\n}\n' "$g_team" > "$g_team_dir/config.json"
-      fi
+      _clmux_ensure_team "$g_team_dir" "$g_team"
       _clmux_spawn_agent gemini gemini-worker "Type your message" keys 0 colour33 -t "$g_team"
     fi
     command claude "${clmux_args[@]}"
@@ -128,16 +134,10 @@ clmux() {
     local g_team_dir="$HOME/.claude/teams/$g_team"
     local g_inbox_dir="$g_team_dir/inboxes"
 
-    mkdir -p "$g_inbox_dir"
+    _clmux_ensure_team "$g_team_dir" "$g_team"
     [[ ! -f "$g_inbox_dir/gemini-worker.json" ]] && echo '[]' > "$g_inbox_dir/gemini-worker.json"
     [[ ! -f "$g_inbox_dir/team-lead.json" ]]    && echo '[]' > "$g_inbox_dir/team-lead.json"
 
-    if [[ ! -f "$g_team_dir/config.json" ]]; then
-      printf '{\n  "name": "%s",\n  "members": []\n}\n' "$g_team" > "$g_team_dir/config.json"
-    fi
-
-    # Wait until the session has at least one pane before spawning
-    tmux has-session -t "=$session_name" 2>/dev/null
     _clmux_spawn_agent_in_session "$session_name" gemini gemini-worker "Type your message" keys 0 colour33 "$g_team"
   fi
 
@@ -172,13 +172,9 @@ _clmux_spawn_agent_in_session() {
   local pid_file="$team_dir/.${agent_name}-bridge.pid"
   local pane_file="$team_dir/.${agent_name}-pane"
 
-  mkdir -p "$inbox_dir"
+  _clmux_ensure_team "$team_dir" "$team_name"
   [[ ! -f "$inbox" ]]  && echo '[]' > "$inbox"
   [[ ! -f "$outbox" ]] && echo '[]' > "$outbox"
-
-  if [[ ! -f "$team_dir/config.json" ]]; then
-    printf '{\n  "name": "%s",\n  "members": []\n}\n' "$team_name" > "$team_dir/config.json"
-  fi
 
   local lead_pane
   lead_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | head -1)
@@ -210,7 +206,8 @@ _clmux_spawn_agent_in_session() {
 
   tmux set-option -p -t "$agent_pane" allow-rename off
   tmux select-pane -t "$agent_pane" -T "$agent_name"
-  tmux set-option -p -t "$agent_pane" pane-border-format "#[fg=${border_color},bold] #{pane_title} #[default]"
+  tmux set-option -p -t "$agent_pane" @agent_name "$agent_name"
+  tmux set-option -p -t "$agent_pane" pane-border-format "#[fg=${border_color},bold] #{@agent_name} #[default]"
   tmux select-pane -t "$lead_pane"
 
   echo "$agent_pane" > "$pane_file"
@@ -246,7 +243,7 @@ _clmux_spawn_agent() {
   shift 6
 
   [[ -z "$TMUX" ]] && { echo "error: _clmux_spawn_agent must be run inside a tmux session" >&2; return 1; }
-  command -v "$cli_cmd" &>/dev/null || { echo "error: $cli_cmd CLI not found in PATH" >&2; return 1; }
+  command -v "${cli_cmd%% *}" &>/dev/null || { echo "error: ${cli_cmd%% *} CLI not found in PATH" >&2; return 1; }
 
   local team_name="" agent_name="$default_agent_name" timeout=30
   local OPTIND=1
@@ -274,15 +271,14 @@ _clmux_spawn_agent() {
   echo '[]' > "$inbox"
   echo '[]' > "$outbox"
 
-  local lead_pane
-  lead_pane=$(tmux display-message -p '#{pane_id}')
+  local lead_pane="${TMUX_PANE}"
 
   local pane_count
   pane_count=$(tmux list-panes -F '#{pane_id}' | wc -l | tr -d ' ')
 
   local agent_pane
   if (( pane_count <= 1 )); then
-    agent_pane=$(tmux split-window -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
+    agent_pane=$(tmux split-window -t "$lead_pane" -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
     tmux resize-pane -t "$agent_pane" -x 70%
   else
     local last_teammate
@@ -304,7 +300,8 @@ _clmux_spawn_agent() {
 
   tmux set-option -p -t "$agent_pane" allow-rename off
   tmux select-pane -t "$agent_pane" -T "$agent_name"
-  tmux set-option -p -t "$agent_pane" pane-border-format "#[fg=${border_color},bold] #{pane_title} #[default]"
+  tmux set-option -p -t "$agent_pane" @agent_name "$agent_name"
+  tmux set-option -p -t "$agent_pane" pane-border-format "#[fg=${border_color},bold] #{@agent_name} #[default]"
   tmux select-pane -t "$lead_pane"
 
   echo "$agent_pane" > "$pane_file"
@@ -398,7 +395,9 @@ clmux-gemini-stop() {
 clmux-codex() {
   # Spawns a Codex CLI tmux pane as a Claude Code teammate.
   # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
-  _clmux_spawn_agent codex codex-worker "›" paste 1 colour36 "$@"
+  # Pre-warm npx cache so MCP server starts instantly when Codex initializes
+  echo '' | npx -y clau-mux-bridge &>/dev/null
+  _clmux_spawn_agent "codex -a never" codex-worker "›" paste 1 colour36 "$@"
 }
 
 clmux-codex-stop() {

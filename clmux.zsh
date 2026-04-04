@@ -175,8 +175,8 @@ clmux() {
 
     # 스타일 적용 — border title만 색상, pane 텍스트는 CLI 네이티브
     tmux select-pane -t "$g_gemini_pane" -T "$g_agent"
+    tmux set-option -p -t "$g_gemini_pane" pane-border-format "#[fg=blue,bold] #{pane_title} #[default]"
     tmux set-option -t "=$session_name" pane-border-status top
-    tmux set-option -t "=$session_name" pane-border-format ' #{pane_title} '
     tmux select-pane -t "$g_lead_pane"
 
     echo "$g_gemini_pane" > "$g_pane_file"
@@ -342,8 +342,8 @@ clmux-gemini() {
 
   # Style — border title only, no pane text color override
   tmux select-pane -t "$gemini_pane" -T "$agent_name"
+  tmux set-option -p -t "$gemini_pane" pane-border-format "#[fg=blue,bold] #{pane_title} #[default]"
   tmux set-option pane-border-status top
-  tmux set-option pane-border-format ' #{pane_title} '
 
   # Return focus to lead pane
   tmux select-pane -t "$lead_pane"
@@ -504,8 +504,8 @@ clmux-codex() {
   fi
 
   tmux select-pane -t "$codex_pane" -T "$agent_name"
+  tmux set-option -p -t "$codex_pane" pane-border-format "#[fg=green,bold] #{pane_title} #[default]"
   tmux set-option pane-border-status top
-  tmux set-option pane-border-format ' #{pane_title} '
   tmux select-pane -t "$lead_pane"
 
   echo "$codex_pane" > "$pane_file"

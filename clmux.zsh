@@ -158,6 +158,19 @@ clmux() {
       local g_last_pane
       g_last_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | grep -v "^${g_lead_pane}$" | tail -1)
       g_gemini_pane=$(tmux split-window -t "$g_last_pane" -v -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$g_outbox CLMUX_AGENT=$g_agent gemini")
+
+      # Equalize all teammate panes vertically
+      local g_teammate_panes
+      g_teammate_panes=($(tmux list-panes -t "=$session_name" -F '#{pane_id}' | grep -v "^${g_lead_pane}$"))
+      local g_count=${#g_teammate_panes[@]}
+      if (( g_count > 1 )); then
+        local g_win_height
+        g_win_height=$(tmux display-message -t "=$session_name" -p '#{window_height}')
+        local g_each=$(( g_win_height / g_count ))
+        for p in "${g_teammate_panes[@]}"; do
+          tmux resize-pane -t "$p" -y "$g_each"
+        done
+      fi
     fi
 
     # 스타일 적용
@@ -313,6 +326,19 @@ clmux-gemini() {
     local last_teammate
     last_teammate=$(tmux list-panes -F '#{pane_id}' | grep -v "^${lead_pane}$" | tail -1)
     gemini_pane=$(tmux split-window -t "$last_teammate" -v -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name gemini")
+
+    # Equalize all teammate panes vertically
+    local teammate_panes
+    teammate_panes=($(tmux list-panes -F '#{pane_id}' | grep -v "^${lead_pane}$"))
+    local count=${#teammate_panes[@]}
+    if (( count > 1 )); then
+      local win_height
+      win_height=$(tmux display-message -p '#{window_height}')
+      local each_height=$(( win_height / count ))
+      for p in "${teammate_panes[@]}"; do
+        tmux resize-pane -t "$p" -y "$each_height"
+      done
+    fi
   fi
 
   # Style the Gemini pane

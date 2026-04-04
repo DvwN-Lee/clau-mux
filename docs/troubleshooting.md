@@ -113,3 +113,33 @@ source ~/clau-mux/clmux.zsh
 # 3. 정상 동작 확인
 clmux -n test
 ```
+
+---
+
+### Teammate 관련
+
+#### Gemini/Codex teammate 응답 없음
+
+브리지 로그를 확인합니다:
+
+```bash
+tail -50 /tmp/clmux-bridge-gemini-worker.log
+tail -50 /tmp/clmux-bridge-codex-worker.log
+```
+
+일반적인 원인:
+
+- MCP 서버 미등록: `scripts/setup.sh` 재실행
+- Codex MCP Tools: (none): bridge-mcp-server.js의 readline race condition — 최신 버전 확인
+- Gemini MCP 초기화 실패: `~/.gemini/settings.json` 확인
+- bridge idle 패턴 불일치: Codex는 `›` (U+203A), Gemini는 `Type your message`
+
+---
+
+#### SendMessage가 inbox에 쓰이지 않음
+
+현재 세션에서 `TeamCreate`가 호출되지 않으면 Claude Code가 file-based inbox 라우팅을 활성화하지 않습니다.
+
+```
+TeamCreate(team_name: "<team_name>")
+```

@@ -25,29 +25,24 @@ Claude Code는 동일 디렉토리에서 새 인스턴스를 실행하면 기존
 git clone https://github.com/DvwN-Lee/clau-mux.git ~/clau-mux
 ```
 
-**2. zshrc에 추가**
+**2. 설치 스크립트 실행**
 
 ```bash
-echo '\nsource ~/clau-mux/clmux.zsh' >> ~/.zshrc
+~/clau-mux/scripts/setup.sh
+```
+
+스크립트가 자동으로 처리하는 항목:
+
+- `~/.zshrc`에 `clmux.zsh` source 라인 추가 (중복 방지)
+- tmux 테마 적용 (선택, 대화형)
+- Gemini CLI가 설치된 경우 MCP 브리지 자동 등록
+- Codex CLI가 설치된 경우 MCP 브리지 자동 등록
+- `GEMINI.md`, `AGENTS.md` 지시 파일 생성
+
+**3. 셸 재로드**
+
+```bash
 source ~/.zshrc
-```
-
-**3. tmux 설정 적용 (선택)**
-
-```bash
-# 기존 ~/.tmux.conf에 추가
-# 주의: 기존 설정과 base-index, pane-base-index 값이 충돌하지 않는지 확인하세요.
-cat ~/clau-mux/tmux.conf >> ~/.tmux.conf
-
-# 즉시 반영
-tmux source ~/.tmux.conf
-```
-
-`~/.tmux.conf`가 없는 경우:
-
-```bash
-cp ~/clau-mux/tmux.conf ~/.tmux.conf
-tmux source ~/.tmux.conf
 ```
 
 ## 사용법

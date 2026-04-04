@@ -95,7 +95,7 @@ while true; do
     if [[ "$INPUT_METHOD" == "paste" ]]; then
       printf '%s' "$text" | tmux load-buffer -
       tmux paste-buffer -t "$PANE_ID"
-      sleep 0.1
+      sleep 0.3
       tmux send-keys -t "$PANE_ID" Enter
     else
       tmux send-keys -t "$PANE_ID" -l "$text"

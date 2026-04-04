@@ -388,7 +388,7 @@ clmux-gemini-stop() {
 clmux-codex() {
   # Spawns a Codex CLI tmux pane as a Claude Code teammate.
   # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
-  _clmux_spawn_agent codex codex-worker ">" paste 1 colour36 "$@"
+  _clmux_spawn_agent codex codex-worker "›" paste 1 colour36 "$@"
 }
 
 clmux-codex-stop() {

@@ -40,6 +40,12 @@ flowchart LR
   outbox -- "teammate-message" --> CC
 ```
 
+## 스크린샷
+
+![메인 화면](docs/screenshots/main.png)
+
+![종료 흐름](docs/screenshots/shutdown.png)
+
 ## 기능
 
 - **세션 격리**: 각 Claude Code 인스턴스를 독립 tmux 세션으로 분리

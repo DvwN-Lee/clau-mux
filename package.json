@@ -1,0 +1,25 @@
+{
+  "name": "clau-mux-bridge",
+  "version": "1.0.0",
+  "description": "MCP stdio server for clau-mux: bridges Gemini/Codex CLI to Claude Code teammate protocol",
+  "bin": {
+    "clau-mux-bridge": "./bridge-mcp-server.js"
+  },
+  "files": [
+    "bridge-mcp-server.js"
+  ],
+  "keywords": [
+    "mcp",
+    "claude-code",
+    "gemini",
+    "codex",
+    "tmux",
+    "teammate"
+  ],
+  "author": "DvwN-Lee",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DvwN-Lee/clau-mux.git"
+  }
+}

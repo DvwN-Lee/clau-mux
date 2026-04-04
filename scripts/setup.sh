@@ -52,36 +52,17 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Gemini MCP 등록 (~/.gemini/settings.json) — 선택
+# 3. Gemini MCP 등록 (~/.gemini/settings.json) — npx 기반
 # ---------------------------------------------------------------------------
-BRIDGE_JS="$CLMUX_DIR/bridge-mcp-server.js"
-
 if command -v gemini >/dev/null 2>&1; then
-  GEMINI_DIR="$HOME/.gemini"
-  mkdir -p "$GEMINI_DIR"
-  SETTINGS_FILE="$GEMINI_DIR/settings.json"
-
-  if python3 -c "
-import json, os
-p = os.path.expanduser('~/.gemini/settings.json')
-if os.path.exists(p):
-    s = json.load(open(p))
-    if 'clau-mux-bridge' in s.get('mcpServers', {}):
-        exit(0)
-exit(1)
-" 2>/dev/null; then
-    python3 "$CLMUX_DIR/scripts/setup_gemini_mcp.py" "$BRIDGE_JS"
-    echo "[OK]   Updated clau-mux-bridge path in ~/.gemini/settings.json"
-  else
-    python3 "$CLMUX_DIR/scripts/setup_gemini_mcp.py" "$BRIDGE_JS"
-    echo "[OK]   Registered clau-mux-bridge in ~/.gemini/settings.json"
-  fi
+  python3 "$CLMUX_DIR/scripts/setup_gemini_mcp.py" npx
+  echo "[OK]   Registered clau-mux-bridge (npx) in ~/.gemini/settings.json"
 else
   echo "[SKIP] gemini CLI not found — skipping Gemini MCP registration"
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Codex MCP 등록 (~/.codex/config.toml) — 선택
+# 4. Codex MCP 등록 (~/.codex/config.toml) — npx 기반
 # ---------------------------------------------------------------------------
 if command -v codex >/dev/null 2>&1; then
   CODEX_CONFIG="$HOME/.codex/config.toml"
@@ -89,8 +70,8 @@ if command -v codex >/dev/null 2>&1; then
   if [[ -f "$CODEX_CONFIG" ]] && grep -q "clau-mux-bridge" "$CODEX_CONFIG" 2>/dev/null; then
     echo "[SKIP] clau-mux-bridge already registered in codex config"
   else
-    codex mcp add clau-mux-bridge -- node "$BRIDGE_JS"
-    echo "[OK]   Registered clau-mux-bridge in codex"
+    codex mcp add clau-mux-bridge -- npx -y clau-mux-bridge
+    echo "[OK]   Registered clau-mux-bridge (npx) in codex"
   fi
 else
   echo "[SKIP] codex CLI not found — skipping Codex MCP registration"

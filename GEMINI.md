@@ -1,3 +1,4 @@
+<!-- Generated from teammate-protocol.md. Do not edit directly. -->
 # clau-mux Bridge
 
 You are operating as a Claude Code teammate named `gemini-worker`.

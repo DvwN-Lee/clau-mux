@@ -5,12 +5,11 @@
  * Exposes write_to_lead(text, summary?) tool so Gemini/Codex can write
  * directly to the Claude Code teammate outbox.
  *
- * Env vars (set by clmux-gemini/clmux-codex):
- *   CLMUX_OUTBOX  — path to outbox.json
- *   CLMUX_AGENT   — agent name (default: gemini-worker)
- *
- * Fallback: reads /tmp/clmux-bridge-<agent>.env when env vars are missing
- * (Codex CLI clears parent env via env_clear()).
+ * Config resolution order (first wins):
+ *   1. CLI args: --outbox <path> --agent <name>
+ *   2. Env vars: CLMUX_OUTBOX, CLMUX_AGENT
+ *   3. Fallback: scans ~/.claude/teams/ for .bridge-<agent>.env files
+ *      (Codex CLI clears parent env via env_clear())
  */
 
 'use strict';
@@ -43,27 +42,47 @@ rl.on('line', (line) => {
   }
 });
 
-// ── Resolve config (env vars or /tmp/ fallback) ─────────────────────────────
+// ── Resolve config (CLI args > env vars > team_dir fallback) ────────────────
 
-let AGENT_NAME = process.env.CLMUX_AGENT || '';
-let OUTBOX = process.env.CLMUX_OUTBOX || '';
+let AGENT_NAME = '';
+let OUTBOX = '';
 
+// 1. CLI args
+const cliArgs = process.argv.slice(2);
+for (let i = 0; i < cliArgs.length; i++) {
+  if (cliArgs[i] === '--outbox' && cliArgs[i + 1]) OUTBOX = cliArgs[++i];
+  if (cliArgs[i] === '--agent'  && cliArgs[i + 1]) AGENT_NAME = cliArgs[++i];
+}
+
+// 2. Env vars
+if (!OUTBOX)     OUTBOX     = process.env.CLMUX_OUTBOX || '';
+if (!AGENT_NAME) AGENT_NAME = process.env.CLMUX_AGENT  || '';
+
+// 3. Fallback: scan ~/.claude/teams/ for .bridge-<agent>.env files
 if (!OUTBOX) {
   try {
-    const envFiles = fs.readdirSync('/tmp').filter(f => f.startsWith('clmux-bridge-') && f.endsWith('.env'));
-    for (const f of envFiles) {
+    const teamsDir = path.join(process.env.HOME || '', '.claude', 'teams');
+    const teams = fs.readdirSync(teamsDir);
+    for (const team of teams) {
+      const teamPath = path.join(teamsDir, team);
       try {
-        const lines = fs.readFileSync(path.join('/tmp', f), 'utf-8').split('\n');
-        const cfg = {};
-        for (const line of lines) {
-          const [k, ...v] = line.split('=');
-          if (k) cfg[k.trim()] = v.join('=').trim();
+        const entries = fs.readdirSync(teamPath).filter(f => f.startsWith('.bridge-') && f.endsWith('.env'));
+        for (const f of entries) {
+          try {
+            const lines = fs.readFileSync(path.join(teamPath, f), 'utf-8').split('\n');
+            const cfg = {};
+            for (const line of lines) {
+              const [k, ...v] = line.split('=');
+              if (k) cfg[k.trim()] = v.join('=').trim();
+            }
+            if (cfg.CLMUX_OUTBOX) {
+              OUTBOX     = cfg.CLMUX_OUTBOX;
+              AGENT_NAME = AGENT_NAME || cfg.CLMUX_AGENT || 'codex-worker';
+              break;
+            }
+          } catch (_) {}
         }
-        if (cfg.CLMUX_OUTBOX) {
-          OUTBOX = cfg.CLMUX_OUTBOX;
-          AGENT_NAME = AGENT_NAME || cfg.CLMUX_AGENT || 'codex-worker';
-          break;
-        }
+        if (OUTBOX) break;
       } catch (_) {}
     }
   } catch (_) {}

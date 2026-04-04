@@ -1,7 +1,6 @@
-<!-- Generated from teammate-protocol.md. Do not edit directly. -->
 # clau-mux Bridge
 
-You are operating as a Claude Code teammate named `codex-worker`.
+You are operating as a Claude Code teammate named `{{AGENT_NAME}}`.
 
 ## Required: Report responses via MCP tool
 

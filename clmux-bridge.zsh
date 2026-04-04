@@ -15,6 +15,9 @@ set -uo pipefail
 # Ensure PATH includes common binary locations
 PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
+# Resolve script directory so we can locate scripts/ helpers
+CLMUX_DIR="${${(%):-%x}:A:h}"
+
 PANE_ID="" INBOX="" TIMEOUT=30 IDLE_PATTERN="Type your message" INPUT_METHOD="keys"
 
 while getopts "p:i:t:w:m:" opt; do
@@ -36,52 +39,6 @@ done
 # Derive agent name from inbox filename (e.g. gemini-worker.json → gemini-worker)
 AGENT_NAME=$(basename "$INBOX" .json)
 
-# ── Python helpers ────────────────────────────────────────────────────────────
-
-cat > /tmp/clmux_bridge_read_unread.py << 'PYEOF'
-import json, sys
-with open(sys.argv[1]) as f:
-    msgs = json.load(f)
-unread = [m for m in msgs if not m.get('read', False)]
-print(json.dumps(unread[0]) if unread else '', end='')
-PYEOF
-
-cat > /tmp/clmux_bridge_mark_read.py << 'PYEOF'
-import json, sys, tempfile, os
-path, ts = sys.argv[1], sys.argv[2]
-with open(path) as f:
-    msgs = json.load(f)
-for m in msgs:
-    if m.get('timestamp') == ts:
-        m['read'] = True
-dir_ = os.path.dirname(os.path.abspath(path))
-with tempfile.NamedTemporaryFile(mode='w', dir=dir_, delete=False, suffix='.tmp') as tf:
-    json.dump(msgs, tf, indent=2)
-    tmp_name = tf.name
-os.replace(tmp_name, path)
-PYEOF
-
-cat > /tmp/clmux_bridge_notify_shutdown.py << 'PYEOF'
-import json, sys, datetime, tempfile, os
-inbox_path, agent_name = sys.argv[1], sys.argv[2]
-outbox_path = os.path.join(os.path.dirname(inbox_path), 'team-lead.json')
-try:
-    with open(outbox_path) as f:
-        msgs = json.load(f)
-except Exception:
-    msgs = []
-now = datetime.datetime.now(datetime.timezone.utc)
-ts = now.strftime('%Y-%m-%dT%H:%M:%S.') + f'{now.microsecond // 1000:03d}Z'
-msgs.append({"from": agent_name, "text": f"{agent_name} has shut down.", "timestamp": ts, "read": False, "summary": f"{agent_name} terminated"})
-if len(msgs) > 50:
-    msgs = msgs[-50:]
-dir_ = os.path.dirname(os.path.abspath(outbox_path))
-with tempfile.NamedTemporaryFile(mode='w', dir=dir_, delete=False, suffix='.tmp') as tf:
-    json.dump(msgs, tf, indent=2, ensure_ascii=False)
-    tmp_name = tf.name
-os.replace(tmp_name, outbox_path)
-PYEOF
-
 # ── Functions ─────────────────────────────────────────────────────────────────
 
 wait_for_idle() {
@@ -96,11 +53,11 @@ wait_for_idle() {
 }
 
 read_unread() {
-  python3 /tmp/clmux_bridge_read_unread.py "$INBOX"
+  python3 "$CLMUX_DIR/scripts/read_unread.py" "$INBOX"
 }
 
 mark_read() {
-  python3 /tmp/clmux_bridge_mark_read.py "$INBOX" "$1"
+  python3 "$CLMUX_DIR/scripts/mark_read.py" "$INBOX" "$1"
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -120,7 +77,7 @@ while true; do
   fi
   tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -q "$PANE_ID" || {
     echo "[clmux-bridge] pane $PANE_ID is gone, notifying lead..." >&2
-    python3 /tmp/clmux_bridge_notify_shutdown.py "$INBOX" "$AGENT_NAME" 2>/dev/null
+    python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME" 2>/dev/null
     echo "[clmux-bridge] shutting down" >&2; exit 0
   }
 

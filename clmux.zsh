@@ -173,8 +173,10 @@ clmux() {
       fi
     fi
 
-    # 스타일 적용 — border title만 색상, pane 텍스트는 CLI 네이티브
+    # 스타일 적용 — Claude Code setPaneTitle() pattern
+    tmux set-option -p -t "$g_gemini_pane" allow-rename off
     tmux select-pane -t "$g_gemini_pane" -T "$g_agent"
+    tmux set-option -p -t "$g_gemini_pane" pane-border-format "#[fg=colour33,bold] #{pane_title} #[default]"
     tmux select-pane -t "$g_lead_pane"
 
     echo "$g_gemini_pane" > "$g_pane_file"
@@ -336,8 +338,10 @@ clmux-gemini() {
     fi
   fi
 
-  # Style — border title only, no pane text color override
+  # Style — Claude Code setPaneTitle() pattern (per-pane border format)
+  tmux set-option -p -t "$gemini_pane" allow-rename off
   tmux select-pane -t "$gemini_pane" -T "$agent_name"
+  tmux set-option -p -t "$gemini_pane" pane-border-format "#[fg=colour33,bold] #{pane_title} #[default]"
 
   # Return focus to lead pane
   tmux select-pane -t "$lead_pane"
@@ -495,7 +499,9 @@ clmux-codex() {
     fi
   fi
 
+  tmux set-option -p -t "$codex_pane" allow-rename off
   tmux select-pane -t "$codex_pane" -T "$agent_name"
+  tmux set-option -p -t "$codex_pane" pane-border-format "#[fg=colour36,bold] #{pane_title} #[default]"
   tmux select-pane -t "$lead_pane"
 
   echo "$codex_pane" > "$pane_file"

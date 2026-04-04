@@ -214,15 +214,15 @@ PYEOF
     python3 /tmp/clmux_update_pane.py "$g_team_dir" "$g_agent" "$g_gemini_pane"
 
     # Bridge 시작
-    if [[ -z "$CLMUX_DIR" || ! -f "$CLMUX_DIR/gemini-bridge.zsh" ]]; then
+    if [[ -z "$CLMUX_DIR" || ! -f "$CLMUX_DIR/clmux-bridge.zsh" ]]; then
       for _d in "$HOME/clau-mux" "$HOME/Desktop/Git/clau-mux"; do
-        [[ -f "$_d/gemini-bridge.zsh" ]] && { CLMUX_DIR="$_d"; break; }
+        [[ -f "$_d/clmux-bridge.zsh" ]] && { CLMUX_DIR="$_d"; break; }
       done
     fi
-    [[ -f "$CLMUX_DIR/gemini-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
-    zsh "$CLMUX_DIR/gemini-bridge.zsh" \
-      -p "$g_gemini_pane" -i "$g_inbox" -t 30 \
-      >> "/tmp/gbridge-${g_agent}.log" 2>&1 &
+    [[ -f "$CLMUX_DIR/clmux-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
+    zsh "$CLMUX_DIR/clmux-bridge.zsh" \
+      -p "$g_gemini_pane" -i "$g_inbox" -t 30 -w "Type your message" \
+      >> "/tmp/clmux-bridge-${g_agent}.log" 2>&1 &
     echo $! > "$g_pid_file"
     disown
 
@@ -385,15 +385,15 @@ PYEOF
   python3 /tmp/clmux_update_pane.py "$team_dir" "$agent_name" "$gemini_pane"
 
   # Start bridge in background
-  if [[ -z "$CLMUX_DIR" || ! -f "$CLMUX_DIR/gemini-bridge.zsh" ]]; then
+  if [[ -z "$CLMUX_DIR" || ! -f "$CLMUX_DIR/clmux-bridge.zsh" ]]; then
     for _d in "$HOME/clau-mux" "$HOME/Desktop/Git/clau-mux"; do
-      [[ -f "$_d/gemini-bridge.zsh" ]] && { CLMUX_DIR="$_d"; break; }
+      [[ -f "$_d/clmux-bridge.zsh" ]] && { CLMUX_DIR="$_d"; break; }
     done
   fi
-  [[ -f "$CLMUX_DIR/gemini-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
-  zsh "$CLMUX_DIR/gemini-bridge.zsh" \
-    -p "$gemini_pane" -i "$inbox" -t "$timeout" \
-    >> "/tmp/gbridge-${agent_name}.log" 2>&1 &
+  [[ -f "$CLMUX_DIR/clmux-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
+  zsh "$CLMUX_DIR/clmux-bridge.zsh" \
+    -p "$gemini_pane" -i "$inbox" -t "$timeout" -w "Type your message" \
+    >> "/tmp/clmux-bridge-${agent_name}.log" 2>&1 &
   echo $! > "$pid_file"
   disown
 
@@ -436,6 +436,161 @@ clmux-gemini-stop() {
     rm -f "$pane_file"
   else
     echo "[clmux-gemini-stop] no pane ID found for $agent_name"
+  fi
+}
+
+clmux-codex() {
+  # Spawns a Codex CLI tmux pane as a Claude Code teammate.
+  # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-c <color>] [-x <timeout>]
+  #   -t  team name (matches ~/.claude/teams/<team_name>/)
+  #   -n  agent name used in messages          (default: codex-worker)
+  #   -c  tmux pane fg color                   (default: #10A37F — OpenAI Green)
+  #   -x  idle-wait timeout in seconds         (default: 30)
+
+  [[ -z "$TMUX" ]] && { echo "error: clmux-codex must be run inside a tmux session" >&2; return 1; }
+  command -v codex &>/dev/null || { echo "error: codex CLI not found in PATH" >&2; return 1; }
+
+  local team_name="" agent_name="codex-worker" color="#10A37F" timeout=30
+  local OPTIND=1
+  while getopts "t:n:c:x:" opt; do
+    case $opt in
+      t) team_name="$OPTARG" ;;
+      n) agent_name="$OPTARG" ;;
+      c) color="$OPTARG" ;;
+      x) timeout="$OPTARG" ;;
+      *) echo "Usage: clmux-codex -t <team_name> [-n <name>] [-c <color>] [-x <timeout>]" >&2; return 1 ;;
+    esac
+  done
+
+  [[ -z "$team_name" ]] && { echo "error: -t <team_name> required" >&2; return 1; }
+
+  local team_dir="$HOME/.claude/teams/$team_name"
+  [[ ! -d "$team_dir" ]] && { echo "error: team '$team_name' not found at $team_dir" >&2; return 1; }
+
+  local inbox_dir="$team_dir/inboxes"
+  local inbox="$inbox_dir/$agent_name.json"
+  local outbox="$inbox_dir/team-lead.json"
+  local pid_file="$team_dir/.${agent_name}-bridge.pid"
+  local pane_file="$team_dir/.${agent_name}-pane"
+
+  mkdir -p "$inbox_dir"
+  echo '[]' > "$inbox"
+  echo '[]' > "$outbox"
+
+  local lead_pane
+  lead_pane=$(tmux display-message -p '#{pane_id}')
+
+  local pane_count
+  pane_count=$(tmux list-panes -F '#{pane_id}' | wc -l | tr -d ' ')
+
+  local codex_pane
+  if (( pane_count <= 1 )); then
+    codex_pane=$(tmux split-window -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name codex")
+    tmux resize-pane -t "$codex_pane" -x 70%
+  else
+    local last_teammate
+    last_teammate=$(tmux list-panes -F '#{pane_id}' | grep -v "^${lead_pane}$" | tail -1)
+    codex_pane=$(tmux split-window -t "$last_teammate" -v -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name codex")
+
+    local teammate_panes
+    teammate_panes=($(tmux list-panes -F '#{pane_id}' | grep -v "^${lead_pane}$"))
+    local count=${#teammate_panes[@]}
+    if (( count > 1 )); then
+      local win_height
+      win_height=$(tmux display-message -p '#{window_height}')
+      local each_height=$(( win_height / count ))
+      for p in "${teammate_panes[@]}"; do
+        tmux resize-pane -t "$p" -y "$each_height"
+      done
+    fi
+  fi
+
+  tmux select-pane -t "$codex_pane" -P "fg=$color"
+  tmux select-pane -t "$codex_pane" -T "$agent_name"
+  tmux set-option pane-border-status top
+  tmux set-option pane-border-format ' #{pane_title} '
+  tmux select-pane -t "$lead_pane"
+
+  echo "$codex_pane" > "$pane_file"
+
+  cat > /tmp/clmux_update_pane.py << 'PYEOF'
+import json, sys, time
+team_dir, agent_name, pane_id = sys.argv[1], sys.argv[2], sys.argv[3]
+cfg_path = f"{team_dir}/config.json"
+with open(cfg_path) as f:
+    cfg = json.load(f)
+team_name = cfg.get('name', team_dir.split('/')[-1])
+updated = False
+for m in cfg['members']:
+    if m.get('name') == agent_name or m.get('agentId', '').startswith(f'{agent_name}@'):
+        m['tmuxPaneId'] = pane_id
+        m['isActive'] = True
+        updated = True
+        break
+if not updated:
+    cfg['members'].append({
+        "agentId": f"{agent_name}@{team_name}",
+        "name": agent_name,
+        "model": "codex",
+        "joinedAt": int(time.time() * 1000),
+        "tmuxPaneId": pane_id,
+        "cwd": ".",
+        "backendType": "tmux",
+        "isActive": True
+    })
+with open(cfg_path, 'w') as f:
+    json.dump(cfg, f, indent=2)
+PYEOF
+  python3 /tmp/clmux_update_pane.py "$team_dir" "$agent_name" "$codex_pane"
+
+  if [[ -z "$CLMUX_DIR" || ! -f "$CLMUX_DIR/clmux-bridge.zsh" ]]; then
+    for _d in "$HOME/clau-mux" "$HOME/Desktop/Git/clau-mux"; do
+      [[ -f "$_d/clmux-bridge.zsh" ]] && { CLMUX_DIR="$_d"; break; }
+    done
+  fi
+  [[ -f "$CLMUX_DIR/clmux-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
+  zsh "$CLMUX_DIR/clmux-bridge.zsh" \
+    -p "$codex_pane" -i "$inbox" -t "$timeout" -w ">" \
+    >> "/tmp/clmux-bridge-${agent_name}.log" 2>&1 &
+  echo $! > "$pid_file"
+  disown
+
+  echo "[clmux-codex] $agent_name attached — pane:$codex_pane  bridge PID:$(< "$pid_file")"
+}
+
+clmux-codex-stop() {
+  local team_name="" agent_name="codex-worker"
+  local OPTIND=1
+  while getopts "t:n:" opt; do
+    case $opt in
+      t) team_name="$OPTARG" ;;
+      n) agent_name="$OPTARG" ;;
+      *) echo "Usage: clmux-codex-stop -t <team_name> [-n <name>]" >&2; return 1 ;;
+    esac
+  done
+
+  [[ -z "$team_name" ]] && { echo "error: -t <team_name> required" >&2; return 1; }
+
+  local team_dir="$HOME/.claude/teams/$team_name"
+  local pid_file="$team_dir/.${agent_name}-bridge.pid"
+  local pane_file="$team_dir/.${agent_name}-pane"
+
+  if [[ -f "$pid_file" ]]; then
+    local pid
+    pid=$(< "$pid_file")
+    kill "$pid" 2>/dev/null && echo "[clmux-codex-stop] bridge PID $pid stopped"
+    rm -f "$pid_file"
+  else
+    echo "[clmux-codex-stop] no bridge PID found for $agent_name"
+  fi
+
+  if [[ -f "$pane_file" ]]; then
+    local pane_id
+    pane_id=$(< "$pane_file")
+    tmux kill-pane -t "$pane_id" 2>/dev/null && echo "[clmux-codex-stop] pane $pane_id closed"
+    rm -f "$pane_file"
+  else
+    echo "[clmux-codex-stop] no pane ID found for $agent_name"
   fi
 }
 

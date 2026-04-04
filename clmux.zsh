@@ -146,16 +146,25 @@ clmux() {
     local g_lead_pane
     g_lead_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | head -1)
 
-    # Gemini pane 스폰
+    # Gemini pane 스폰 — teammate pane 유무에 따라 분기
+    local g_pane_count
+    g_pane_count=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | wc -l | tr -d ' ')
+
     local g_gemini_pane
-    g_gemini_pane=$(tmux split-window -t "$g_lead_pane" -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$g_outbox CLMUX_AGENT=$g_agent gemini")
+    if (( g_pane_count <= 1 )); then
+      g_gemini_pane=$(tmux split-window -t "$g_lead_pane" -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$g_outbox CLMUX_AGENT=$g_agent gemini")
+      tmux resize-pane -t "$g_gemini_pane" -x 70%
+    else
+      local g_last_pane
+      g_last_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | grep -v "^${g_lead_pane}$" | tail -1)
+      g_gemini_pane=$(tmux split-window -t "$g_last_pane" -v -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$g_outbox CLMUX_AGENT=$g_agent gemini")
+    fi
 
     # 스타일 적용
     tmux select-pane -t "$g_gemini_pane" -P "fg=#4285F4"
     tmux select-pane -t "$g_gemini_pane" -T "$g_agent"
     tmux set-option -t "=$session_name" pane-border-status top
     tmux set-option -t "=$session_name" pane-border-format ' #{pane_title} '
-    tmux resize-pane -t "$g_gemini_pane" -x 70%
     tmux select-pane -t "$g_lead_pane"
 
     echo "$g_gemini_pane" > "$g_pane_file"
@@ -290,18 +299,27 @@ clmux-gemini() {
   local lead_pane
   lead_pane=$(tmux display-message -p '#{pane_id}')
 
-  # Spawn Gemini pane to the right
+  # Count panes: 1 = lead only, >1 = teammates already exist
+  local pane_count
+  pane_count=$(tmux list-panes -F '#{pane_id}' | wc -l | tr -d ' ')
+
   local gemini_pane
-  gemini_pane=$(tmux split-window -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name gemini")
+  if (( pane_count <= 1 )); then
+    # No teammates — first split, create teammate column to the right
+    gemini_pane=$(tmux split-window -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name gemini")
+    tmux resize-pane -t "$gemini_pane" -x 70%
+  else
+    # Teammates exist — stack vertically below last teammate pane (Claude Code style)
+    local last_teammate
+    last_teammate=$(tmux list-panes -F '#{pane_id}' | grep -v "^${lead_pane}$" | tail -1)
+    gemini_pane=$(tmux split-window -t "$last_teammate" -v -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name gemini")
+  fi
 
   # Style the Gemini pane
   tmux select-pane -t "$gemini_pane" -P "fg=$color"
   tmux select-pane -t "$gemini_pane" -T "$agent_name"
   tmux set-option pane-border-status top
   tmux set-option pane-border-format ' #{pane_title} '
-
-  # Resize Gemini pane to 70% of total window width
-  tmux resize-pane -t "$gemini_pane" -x 70%
 
   # Return focus to lead pane
   tmux select-pane -t "$lead_pane"

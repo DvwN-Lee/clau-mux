@@ -104,7 +104,14 @@ mark_read() {
 echo "[gemini-bridge] started — pane:$PANE_ID  inbox:$INBOX"
 
 wait_for_idle || { echo "[gemini-bridge] error: Gemini not ready" >&2; exit 1; }
-echo "[gemini-bridge] Gemini ready — polling inbox every 2s (Ctrl+C to stop)"
+echo "[gemini-bridge] Gemini ready — sending activation prompt"
+
+# Send initial activation prompt so lead receives a ready notification
+tmux send-keys -t "$PANE_ID" -l "You are now connected as a Claude Code teammate. Briefly introduce yourself in Korean."
+sleep 0.1
+tmux send-keys -t "$PANE_ID" Enter
+
+echo "[gemini-bridge] polling inbox every 2s (Ctrl+C to stop)"
 
 trap 'echo "[gemini-bridge] shutting down"; exit 0' INT TERM
 

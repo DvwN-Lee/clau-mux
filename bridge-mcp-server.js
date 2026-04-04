@@ -59,30 +59,44 @@ if (!OUTBOX)     OUTBOX     = process.env.CLMUX_OUTBOX || '';
 if (!AGENT_NAME) AGENT_NAME = process.env.CLMUX_AGENT  || '';
 
 // 3. Fallback: scan ~/.claude/teams/ for .bridge-<agent>.env files
+//    In multi-team environments, select the most recently modified file.
 if (!OUTBOX) {
   try {
     const teamsDir = path.join(process.env.HOME || '', '.claude', 'teams');
     const teams = fs.readdirSync(teamsDir);
+
+    // Collect all candidate env files with their mtimes
+    const candidates = [];
     for (const team of teams) {
       const teamPath = path.join(teamsDir, team);
       try {
         const entries = fs.readdirSync(teamPath).filter(f => f.startsWith('.bridge-') && f.endsWith('.env'));
         for (const f of entries) {
+          const fullPath = path.join(teamPath, f);
           try {
-            const lines = fs.readFileSync(path.join(teamPath, f), 'utf-8').split('\n');
-            const cfg = {};
-            for (const line of lines) {
-              const [k, ...v] = line.split('=');
-              if (k) cfg[k.trim()] = v.join('=').trim();
-            }
-            if (cfg.CLMUX_OUTBOX) {
-              OUTBOX     = cfg.CLMUX_OUTBOX;
-              AGENT_NAME = AGENT_NAME || cfg.CLMUX_AGENT || 'codex-worker';
-              break;
-            }
+            const mtime = fs.statSync(fullPath).mtimeMs;
+            candidates.push({ fullPath, mtime });
           } catch (_) {}
         }
-        if (OUTBOX) break;
+      } catch (_) {}
+    }
+
+    // Sort by most recently modified first
+    candidates.sort((a, b) => b.mtime - a.mtime);
+
+    for (const { fullPath } of candidates) {
+      try {
+        const lines = fs.readFileSync(fullPath, 'utf-8').split('\n');
+        const cfg = {};
+        for (const line of lines) {
+          const [k, ...v] = line.split('=');
+          if (k) cfg[k.trim()] = v.join('=').trim();
+        }
+        if (cfg.CLMUX_OUTBOX) {
+          OUTBOX     = cfg.CLMUX_OUTBOX;
+          AGENT_NAME = AGENT_NAME || cfg.CLMUX_AGENT || 'codex-worker';
+          break;
+        }
       } catch (_) {}
     }
   } catch (_) {}

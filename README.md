@@ -15,6 +15,7 @@ Claude Code는 동일 디렉토리에서 새 인스턴스를 실행하면 기존
 - **세션 격리**: 각 Claude Code 인스턴스를 독립 tmux 세션으로 분리
 - **충돌 방지**: 동일 세션 중복 실행 차단, orphaned 세션 자동 정리
 - **Gemini Teammate**: Gemini CLI를 Claude Code teammate로 연결 (MCP bridge)
+- **Codex Teammate**: OpenAI Codex CLI를 Claude Code teammate로 연결 (MCP bridge)
 - **tmux 테마**: 커스텀 상태바, 마우스 토글, copy mode
 
 ## 설치
@@ -60,6 +61,15 @@ $ clmux -n PO
 $ clmux -n BE --resume
 $ clmux -n FE --continue
 
+# Gemini teammate와 함께 세션 시작 (-g 플래그)
+$ clmux -g
+
+# Gemini teammate + 팀 이름 지정 (-T 플래그)
+$ clmux -g -T my-team
+
+# 세션 이름 + Gemini teammate + 팀 이름 조합
+$ clmux -n PO -g -T po-team
+
 # 세션 목록 확인
 $ clmux-ls
 
@@ -87,17 +97,36 @@ SendMessage(to: "gemini-worker", message: "/exit")
 
 자세한 내용은 [Gemini Teammate 상세](docs/gemini-teammate.md)를 참고하세요.
 
+### Codex Teammate
+
+OpenAI Codex CLI를 Claude Code의 teammate로 연결합니다. Codex는 MCP 도구(`clau-mux-bridge`)를 통해 lead에 응답합니다.
+
+```bash
+# Codex teammate 시작
+clmux-codex -t <team_name>
+
+# Claude Code 내부에서 메시지 전송
+SendMessage(to: "codex-worker", message: "...")
+
+# 종료
+clmux-codex-stop -t <team_name>
+```
+
 ## 명령어 요약
 
 | 옵션 | 설명 |
 |------|------|
 | `clmux -n <name>` | tmux 세션 이름 직접 지정 |
 | `-n` 없이 실행 | 현재 디렉토리 경로의 md5 해시 앞 6자를 세션 이름으로 자동 지정 |
+| `clmux -g` | 세션 시작 시 Gemini teammate 자동 스폰 |
+| `clmux -T <team>` | `-g` 와 함께 사용 — teammate에 사용할 팀 이름 지정 |
 | 그 외 모든 옵션 | Claude Code에 그대로 전달 (`--resume`, `--continue` 등) |
 | `clmux-ls` | 활성 세션 목록 + orphaned 세션 경고 표시 |
 | `clmux-cleanup` | attached 클라이언트 없는 orphaned 세션 일괄 제거 |
 | `clmux-gemini -t <team>` | Gemini CLI를 teammate로 연결 |
 | `clmux-gemini-stop -t <team>` | Gemini teammate 종료 |
+| `clmux-codex -t <team>` | Codex CLI를 teammate로 연결 |
+| `clmux-codex-stop -t <team>` | Codex teammate 종료 |
 
 ## 요구사항
 

@@ -136,8 +136,8 @@ clmux() {
       printf '{\n  "name": "%s",\n  "members": []\n}\n' "$g_team" > "$g_team_dir/config.json"
     fi
 
-    # Run spawn inside the new session
-    tmux send-keys -t "=$session_name" "" ""  # no-op to ensure session is alive
+    # Wait until the session has at least one pane before spawning
+    tmux has-session -t "=$session_name" 2>/dev/null
     _clmux_spawn_agent_in_session "$session_name" gemini gemini-worker "Type your message" keys 0 colour33 "$g_team"
   fi
 
@@ -149,6 +149,10 @@ clmux() {
 # (outside tmux context — uses tmux send-keys trick is not needed, we just
 # call _clmux_spawn_agent directly after attach would be too late, so we
 # replicate the pane-split logic here directly via tmux commands).
+# Usage: _clmux_spawn_agent_in_session <session> <cli_cmd> <agent_name> \
+#                                       <idle_pattern> <input_method> \
+#                                       <needs_env_file> <border_color> \
+#                                       <team_name> [timeout_sec]
 _clmux_spawn_agent_in_session() {
   local session_name="$1"
   local cli_cmd="$2"
@@ -158,6 +162,7 @@ _clmux_spawn_agent_in_session() {
   local needs_env_file="$6"
   local border_color="$7"
   local team_name="$8"
+  local timeout="${9:-30}"
 
   local agent_name="$default_agent_name"
   local team_dir="$HOME/.claude/teams/$team_name"
@@ -218,7 +223,7 @@ _clmux_spawn_agent_in_session() {
 
   [[ -f "$CLMUX_DIR/clmux-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
   zsh "$CLMUX_DIR/clmux-bridge.zsh" \
-    -p "$agent_pane" -i "$inbox" -t 30 -w "$idle_pattern" -m "$input_method" \
+    -p "$agent_pane" -i "$inbox" -t "$timeout" -w "$idle_pattern" -m "$input_method" \
     >> "/tmp/clmux-bridge-${agent_name}.log" 2>&1 &
   echo $! > "$pid_file"
   disown
@@ -369,6 +374,11 @@ _clmux_stop_agent() {
 
   # Clean up env file if present
   rm -f "$team_dir/.bridge-${agent_name}.env"
+
+  # Mark agent as inactive in config.json
+  if [[ -f "$team_dir/config.json" ]]; then
+    python3 "$CLMUX_DIR/scripts/deactivate_pane.py" "$team_dir" "$agent_name"
+  fi
 }
 
 # ── Public wrappers ───────────────────────────────────────────────────────────

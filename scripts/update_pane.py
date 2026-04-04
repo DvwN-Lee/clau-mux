@@ -1,5 +1,5 @@
 import json, sys, time
-team_dir, agent_name, pane_id, model_name = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+team_dir, agent_name, pane_id, cli_cmd = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 cfg_path = f"{team_dir}/config.json"
 with open(cfg_path) as f:
     cfg = json.load(f)
@@ -15,7 +15,7 @@ if not updated:
     cfg['members'].append({
         "agentId": f"{agent_name}@{team_name}",
         "name": agent_name,
-        "model": model_name,
+        "model": cli_cmd,
         "joinedAt": int(time.time() * 1000),
         "tmuxPaneId": pane_id,
         "cwd": ".",

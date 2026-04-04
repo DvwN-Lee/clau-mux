@@ -12,24 +12,32 @@ Claude Code는 동일 디렉토리에서 새 인스턴스를 실행하면 기존
 
 ## 아키텍처
 
-```
-Claude Code (lead)
-  │
-  ├── SendMessage → inbox.json
-  │                    ↓
-  │              clmux-bridge.zsh (polling)
-  │                    ↓
-  │              tmux send-keys / paste-buffer
-  │                    ↓
-  │         ┌─── Gemini CLI ───┐  ┌─── Codex CLI ───┐
-  │         │   (teammate pane) │  │  (teammate pane) │
-  │         └──────────────────┘  └──────────────────┘
-  │                    │                    │
-  │              write_to_lead (MCP)
-  │                    ↓
-  │         bridge-mcp-server.js (npx clau-mux-bridge)
-  │                    ↓
-  └── outbox.json → teammate-message 수신
+```mermaid
+flowchart LR
+  subgraph Lead
+    CC[Claude Code]
+  end
+
+  subgraph Bridge
+    inbox[inbox.json]
+    bridge[clmux-bridge.zsh]
+    mcp[bridge-mcp-server.js]
+    outbox[outbox.json]
+  end
+
+  subgraph Teammates
+    G[Gemini CLI]
+    X[Codex CLI]
+  end
+
+  CC -- "SendMessage" --> inbox
+  inbox -- "polling 2s" --> bridge
+  bridge -- "send-keys" --> G
+  bridge -- "paste-buffer" --> X
+  G -- "write_to_lead (MCP)" --> mcp
+  X -- "write_to_lead (MCP)" --> mcp
+  mcp --> outbox
+  outbox -- "teammate-message" --> CC
 ```
 
 ## 기능

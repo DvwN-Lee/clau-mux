@@ -72,7 +72,7 @@ $ clmux-cleanup
 
 ### Gemini Teammate
 
-Gemini CLI를 Claude Code의 teammate로 연결합니다. `gemini-bridge.zsh`가 중계 역할을 하며, Gemini는 MCP 도구를 통해 lead에 응답합니다.
+Gemini CLI를 Claude Code의 teammate로 연결합니다. `clmux-bridge.zsh`가 중계 역할을 하며, Gemini는 MCP 도구(`clau-mux-bridge`)를 통해 lead에 응답합니다.
 
 ```bash
 # Gemini teammate 시작
@@ -108,7 +108,9 @@ SendMessage(to: "gemini-worker", message: "/exit")
 - [Nerd Font](https://www.nerdfonts.com/) (tmux 테마 사용 시)
 - iTerm2 (다른 터미널도 동작하나 iTerm2 기준으로 검증)
 - Gemini CLI (`gemini`) — Gemini teammate 사용 시
-- Python 3 — `bridge-mcp-server.py` 실행 시
+- Codex CLI (`codex`) — Codex teammate 사용 시
+- Node.js / npm — MCP 서버 (`npx clau-mux-bridge`) 실행 시
+- Python 3 — bridge 헬퍼 스크립트 실행 시
 
 ## 주의사항
 

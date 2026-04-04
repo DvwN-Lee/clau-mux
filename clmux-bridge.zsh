@@ -3,26 +3,28 @@
 # Generic bridge: Claude Code teammate inbox ↔ CLI tmux pane.
 # Supports Gemini CLI, Codex CLI, or any MCP-capable CLI.
 #
-# Usage: clmux-bridge.zsh -p <pane_id> -i <inbox> [-t <timeout>] [-w <idle_pattern>]
+# Usage: clmux-bridge.zsh -p <pane_id> -i <inbox> [-t <timeout>] [-w <idle_pattern>] [-m paste]
 #   -p  tmux pane ID                    (e.g. %72)
 #   -i  inbox JSON file                 (lead → agent)
 #   -t  idle-wait timeout in seconds    (default: 30)
 #   -w  grep pattern for idle detection (default: "Type your message")
+#   -m  input method: "keys" (default) or "paste" (for TUIs like Codex)
 
 set -uo pipefail
 
 # Ensure PATH includes common binary locations
 PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
-PANE_ID="" INBOX="" TIMEOUT=30 IDLE_PATTERN="Type your message"
+PANE_ID="" INBOX="" TIMEOUT=30 IDLE_PATTERN="Type your message" INPUT_METHOD="keys"
 
-while getopts "p:i:t:w:" opt; do
+while getopts "p:i:t:w:m:" opt; do
   case $opt in
     p) PANE_ID="$OPTARG" ;;
     i) INBOX="$OPTARG" ;;
     t) TIMEOUT="$OPTARG" ;;
     w) IDLE_PATTERN="$OPTARG" ;;
-    *) echo "Usage: $0 -p <pane_id> -i <inbox> [-t <timeout>] [-w <idle_pattern>]" >&2; exit 1 ;;
+    m) INPUT_METHOD="$OPTARG" ;;
+    *) echo "Usage: $0 -p <pane_id> -i <inbox> [-t <timeout>] [-w <idle_pattern>] [-m paste]" >&2; exit 1 ;;
   esac
 done
 
@@ -133,9 +135,16 @@ while true; do
 
     wait_for_idle || { echo "[clmux-bridge] warning: not idle before sending" >&2; }
 
-    tmux send-keys -t "$PANE_ID" -l "$text"
-    sleep 0.1
-    tmux send-keys -t "$PANE_ID" Enter
+    if [[ "$INPUT_METHOD" == "paste" ]]; then
+      printf '%s' "$text" | tmux load-buffer -
+      tmux paste-buffer -t "$PANE_ID"
+      sleep 0.1
+      tmux send-keys -t "$PANE_ID" Enter
+    else
+      tmux send-keys -t "$PANE_ID" -l "$text"
+      sleep 0.1
+      tmux send-keys -t "$PANE_ID" Enter
+    fi
 
     [[ -n "$ts" ]] && mark_read "$ts"
   fi

@@ -20,8 +20,30 @@ const path = require('path');
 const readline = require('readline');
 const crypto = require('crypto');
 
-const AGENT_NAME = process.env.CLMUX_AGENT || 'gemini-worker';
-const OUTBOX = process.env.CLMUX_OUTBOX || '';
+// Read from env first, then fallback to config file (for CLIs like Codex
+// that don't pass parent env to MCP server subprocesses)
+let AGENT_NAME = process.env.CLMUX_AGENT || '';
+let OUTBOX = process.env.CLMUX_OUTBOX || '';
+
+if (!OUTBOX) {
+  const envFiles = fs.readdirSync('/tmp').filter(f => f.startsWith('clmux-bridge-') && f.endsWith('.env'));
+  for (const f of envFiles) {
+    try {
+      const lines = fs.readFileSync(path.join('/tmp', f), 'utf-8').split('\n');
+      const cfg = {};
+      for (const line of lines) {
+        const [k, ...v] = line.split('=');
+        if (k) cfg[k.trim()] = v.join('=').trim();
+      }
+      if (cfg.CLMUX_OUTBOX) {
+        OUTBOX = OUTBOX || cfg.CLMUX_OUTBOX;
+        AGENT_NAME = AGENT_NAME || cfg.CLMUX_AGENT || 'codex-worker';
+        break;
+      }
+    } catch (_) {}
+  }
+}
+if (!AGENT_NAME) AGENT_NAME = 'gemini-worker';
 
 // ── Protocol helpers ──────────────────────────────────────────────────────────
 

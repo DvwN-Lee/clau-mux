@@ -549,8 +549,12 @@ PYEOF
     done
   fi
   [[ -f "$CLMUX_DIR/clmux-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
+
+  # Write env file for MCP server (Codex doesn't pass parent env to MCP subprocesses)
+  printf 'CLMUX_OUTBOX=%s\nCLMUX_AGENT=%s\n' "$outbox" "$agent_name" > "/tmp/clmux-bridge-${agent_name}.env"
+
   zsh "$CLMUX_DIR/clmux-bridge.zsh" \
-    -p "$codex_pane" -i "$inbox" -t "$timeout" -w ">" \
+    -p "$codex_pane" -i "$inbox" -t "$timeout" -w ">" -m paste \
     >> "/tmp/clmux-bridge-${agent_name}.log" 2>&1 &
   echo $! > "$pid_file"
   disown

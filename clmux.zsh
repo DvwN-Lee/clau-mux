@@ -175,8 +175,6 @@ clmux() {
 
     # 스타일 적용 — border title만 색상, pane 텍스트는 CLI 네이티브
     tmux select-pane -t "$g_gemini_pane" -T "$g_agent"
-    tmux set-option -p -t "$g_gemini_pane" pane-border-format "#[fg=blue,bold] #{pane_title} #[default]"
-    tmux set-option -t "=$session_name" pane-border-status top
     tmux select-pane -t "$g_lead_pane"
 
     echo "$g_gemini_pane" > "$g_pane_file"
@@ -272,24 +270,22 @@ clmux-cleanup() {
 
 clmux-gemini() {
   # Spawns a Gemini CLI tmux pane as a Claude Code teammate.
-  # Usage: clmux-gemini -t <team_name> [-n <agent_name>] [-c <color>] [-x <timeout_sec>]
+  # Usage: clmux-gemini -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
   #   -t  team name (matches ~/.claude/teams/<team_name>/)
   #   -n  agent name used in messages          (default: gemini-worker)
-  #   -c  tmux pane fg color                   (default: #4285F4 — Google Blue)
   #   -x  idle-wait timeout in seconds         (default: 30)
 
   [[ -z "$TMUX" ]] && { echo "error: clmux-gemini must be run inside a tmux session" >&2; return 1; }
   command -v gemini &>/dev/null || { echo "error: gemini CLI not found in PATH" >&2; return 1; }
 
-  local team_name="" agent_name="gemini-worker" color="#4285F4" timeout=30
+  local team_name="" agent_name="gemini-worker" timeout=30
   local OPTIND=1
-  while getopts "t:n:c:x:" opt; do
+  while getopts "t:n:x:" opt; do
     case $opt in
       t) team_name="$OPTARG" ;;
       n) agent_name="$OPTARG" ;;
-      c) color="$OPTARG" ;;
       x) timeout="$OPTARG" ;;
-      *) echo "Usage: clmux-gemini -t <team_name> [-n <name>] [-c <color>] [-x <timeout>]" >&2; return 1 ;;
+      *) echo "Usage: clmux-gemini -t <team_name> [-n <name>] [-x <timeout>]" >&2; return 1 ;;
     esac
   done
 
@@ -342,8 +338,6 @@ clmux-gemini() {
 
   # Style — border title only, no pane text color override
   tmux select-pane -t "$gemini_pane" -T "$agent_name"
-  tmux set-option -p -t "$gemini_pane" pane-border-format "#[fg=blue,bold] #{pane_title} #[default]"
-  tmux set-option pane-border-status top
 
   # Return focus to lead pane
   tmux select-pane -t "$lead_pane"
@@ -439,24 +433,22 @@ clmux-gemini-stop() {
 
 clmux-codex() {
   # Spawns a Codex CLI tmux pane as a Claude Code teammate.
-  # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-c <color>] [-x <timeout>]
+  # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-x <timeout>]
   #   -t  team name (matches ~/.claude/teams/<team_name>/)
   #   -n  agent name used in messages          (default: codex-worker)
-  #   -c  tmux pane fg color                   (default: #10A37F — OpenAI Green)
   #   -x  idle-wait timeout in seconds         (default: 30)
 
   [[ -z "$TMUX" ]] && { echo "error: clmux-codex must be run inside a tmux session" >&2; return 1; }
   command -v codex &>/dev/null || { echo "error: codex CLI not found in PATH" >&2; return 1; }
 
-  local team_name="" agent_name="codex-worker" color="#10A37F" timeout=30
+  local team_name="" agent_name="codex-worker" timeout=30
   local OPTIND=1
-  while getopts "t:n:c:x:" opt; do
+  while getopts "t:n:x:" opt; do
     case $opt in
       t) team_name="$OPTARG" ;;
       n) agent_name="$OPTARG" ;;
-      c) color="$OPTARG" ;;
       x) timeout="$OPTARG" ;;
-      *) echo "Usage: clmux-codex -t <team_name> [-n <name>] [-c <color>] [-x <timeout>]" >&2; return 1 ;;
+      *) echo "Usage: clmux-codex -t <team_name> [-n <name>] [-x <timeout>]" >&2; return 1 ;;
     esac
   done
 
@@ -504,8 +496,6 @@ clmux-codex() {
   fi
 
   tmux select-pane -t "$codex_pane" -T "$agent_name"
-  tmux set-option -p -t "$codex_pane" pane-border-format "#[fg=green,bold] #{pane_title} #[default]"
-  tmux set-option pane-border-status top
   tmux select-pane -t "$lead_pane"
 
   echo "$codex_pane" > "$pane_file"

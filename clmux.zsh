@@ -1,4 +1,10 @@
-CLMUX_DIR="${${(%):-%x}:A:h}"
+if [[ -n "$ZSH_VERSION" ]]; then
+  CLMUX_DIR="${${(%):-%x}:A:h}"
+else
+  CLMUX_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+fi
+export CLMUX_DIR
+
 
 clmux() {
   # 전제조건 검증
@@ -142,14 +148,14 @@ clmux() {
 
     # Gemini pane 스폰
     local g_gemini_pane
-    g_gemini_pane=$(tmux split-window -t "$g_lead_pane" -h -l 70% -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$g_outbox CLMUX_AGENT=$g_agent gemini")
+    g_gemini_pane=$(tmux split-window -t "$g_lead_pane" -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$g_outbox CLMUX_AGENT=$g_agent gemini")
 
     # 스타일 적용
     tmux select-pane -t "$g_gemini_pane" -P "fg=#4285F4"
     tmux select-pane -t "$g_gemini_pane" -T "$g_agent"
     tmux set-option -t "=$session_name" pane-border-status top
     tmux set-option -t "=$session_name" pane-border-format ' #{pane_title} '
-    tmux resize-pane -t "$g_lead_pane" -x 30%
+    tmux resize-pane -t "$g_gemini_pane" -x 70%
     tmux select-pane -t "$g_lead_pane"
 
     echo "$g_gemini_pane" > "$g_pane_file"
@@ -186,6 +192,12 @@ PYEOF
     python3 /tmp/clmux_update_pane.py "$g_team_dir" "$g_agent" "$g_gemini_pane"
 
     # Bridge 시작
+    if [[ -z "$CLMUX_DIR" || ! -f "$CLMUX_DIR/gemini-bridge.zsh" ]]; then
+      for _d in "$HOME/clau-mux" "$HOME/Desktop/Git/clau-mux"; do
+        [[ -f "$_d/gemini-bridge.zsh" ]] && { CLMUX_DIR="$_d"; break; }
+      done
+    fi
+    [[ -f "$CLMUX_DIR/gemini-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
     zsh "$CLMUX_DIR/gemini-bridge.zsh" \
       -p "$g_gemini_pane" -i "$g_inbox" -t 30 \
       >> "/tmp/gbridge-${g_agent}.log" 2>&1 &
@@ -278,9 +290,9 @@ clmux-gemini() {
   local lead_pane
   lead_pane=$(tmux display-message -p '#{pane_id}')
 
-  # Spawn Gemini pane to the right (70% width)
+  # Spawn Gemini pane to the right
   local gemini_pane
-  gemini_pane=$(tmux split-window -h -l 70% -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name gemini")
+  gemini_pane=$(tmux split-window -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name gemini")
 
   # Style the Gemini pane
   tmux select-pane -t "$gemini_pane" -P "fg=$color"
@@ -288,8 +300,8 @@ clmux-gemini() {
   tmux set-option pane-border-status top
   tmux set-option pane-border-format ' #{pane_title} '
 
-  # Ensure lead stays at 30%
-  tmux resize-pane -t "$lead_pane" -x 30%
+  # Resize Gemini pane to 70% of total window width
+  tmux resize-pane -t "$gemini_pane" -x 70%
 
   # Return focus to lead pane
   tmux select-pane -t "$lead_pane"
@@ -329,6 +341,12 @@ PYEOF
   python3 /tmp/clmux_update_pane.py "$team_dir" "$agent_name" "$gemini_pane"
 
   # Start bridge in background
+  if [[ -z "$CLMUX_DIR" || ! -f "$CLMUX_DIR/gemini-bridge.zsh" ]]; then
+    for _d in "$HOME/clau-mux" "$HOME/Desktop/Git/clau-mux"; do
+      [[ -f "$_d/gemini-bridge.zsh" ]] && { CLMUX_DIR="$_d"; break; }
+    done
+  fi
+  [[ -f "$CLMUX_DIR/gemini-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
   zsh "$CLMUX_DIR/gemini-bridge.zsh" \
     -p "$gemini_pane" -i "$inbox" -t "$timeout" \
     >> "/tmp/gbridge-${agent_name}.log" 2>&1 &

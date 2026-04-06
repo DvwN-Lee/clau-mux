@@ -1,7 +1,16 @@
 import json, sys, tempfile, os
+
 path, ts = sys.argv[1], sys.argv[2]
-with open(path) as f:
-    msgs = json.load(f)
+try:
+    with open(path) as f:
+        msgs = json.load(f)
+except FileNotFoundError:
+    print(f"mark_read: inbox not found: {path}", file=sys.stderr)
+    sys.exit(1)
+except json.JSONDecodeError as e:
+    print(f"mark_read: JSON parse error in {path}: {e}", file=sys.stderr)
+    sys.exit(1)
+
 for m in msgs:
     if m.get('timestamp') == ts:
         m['read'] = True

@@ -67,7 +67,15 @@ echo "[clmux-bridge] started — pane:$PANE_ID  agent:$AGENT_NAME  idle:\"$IDLE_
 wait_for_idle || { echo "[clmux-bridge] error: CLI not ready (pattern: $IDLE_PATTERN)" >&2; exit 1; }
 echo "[clmux-bridge] ready — polling inbox every 2s (Ctrl+C to stop)"
 
-trap 'echo "[clmux-bridge] shutting down"; exit 0' INT TERM
+TEAM_DIR=$(dirname "$(dirname "$INBOX")")
+
+cleanup() {
+  rm -f "$TEAM_DIR/.bridge-${AGENT_NAME}.env"
+  rm -f "$TEAM_DIR/.${AGENT_NAME}-bridge.pid"
+  rm -f "$TEAM_DIR/.${AGENT_NAME}-pane"
+  echo "[clmux-bridge] shutting down"
+}
+trap 'cleanup; exit 0' INT TERM EXIT
 
 while true; do
   if ! command -v tmux &>/dev/null; then
@@ -75,10 +83,10 @@ while true; do
     sleep 5
     continue
   fi
-  tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -q "$PANE_ID" || {
+  tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qx -- "$PANE_ID" || {
     echo "[clmux-bridge] pane $PANE_ID is gone, notifying lead..." >&2
     python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME" 2>/dev/null
-    echo "[clmux-bridge] shutting down" >&2; exit 0
+    exit 0
   }
 
   msg=$(read_unread)
@@ -107,10 +115,8 @@ except: print('')
 " "$text" 2>/dev/null)
       [[ -n "$ts" ]] && mark_read "$ts"
       tmux kill-pane -t "$PANE_ID" 2>/dev/null
-      team_dir=$(dirname "$(dirname "$INBOX")")
       python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME" "$request_id" 2>/dev/null
-      python3 "$CLMUX_DIR/scripts/deactivate_pane.py" "$team_dir" "$AGENT_NAME" 2>/dev/null
-      echo "[clmux-bridge] shutting down" >&2
+      python3 "$CLMUX_DIR/scripts/deactivate_pane.py" "$TEAM_DIR" "$AGENT_NAME" 2>/dev/null
       exit 0
     fi
 

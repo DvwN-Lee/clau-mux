@@ -42,6 +42,14 @@ rl.on('line', (line) => {
   }
 });
 
+// ── Path validation ──────────────────────────────────────────────────────────
+
+function validateOutboxPath(p) {
+  const resolved = path.resolve(p);
+  const base = path.resolve(process.env.HOME || '', '.claude');
+  return resolved.startsWith(base + path.sep) && resolved.endsWith('.json') && !p.includes('..');
+}
+
 // ── Resolve config (CLI args > env vars > team_dir fallback) ────────────────
 
 let AGENT_NAME = '';
@@ -78,7 +86,9 @@ if (!OUTBOX) {
             candidates.push({ fullPath, mtime });
           } catch (_) {}
         }
-      } catch (_) {}
+      } catch (e) {
+        process.stderr.write('[clmux-bridge] fallback scan error (team): ' + e.message + '\n');
+      }
     }
 
     // Sort by most recently modified first
@@ -93,15 +103,22 @@ if (!OUTBOX) {
           if (k) cfg[k.trim()] = v.join('=').trim();
         }
         if (cfg.CLMUX_OUTBOX) {
+          const teamFromEnvPath = fullPath.match(/teams\/([^/]+)\//)?.[1];
+          const teamFromOutbox  = (cfg.CLMUX_OUTBOX || '').match(/teams\/([^/]+)\//)?.[1];
+          if (!teamFromEnvPath || !teamFromOutbox || teamFromEnvPath !== teamFromOutbox) continue;
+          if (cfg.CLMUX_TEAM && cfg.CLMUX_TEAM !== teamFromEnvPath) continue;
           OUTBOX     = cfg.CLMUX_OUTBOX;
-          AGENT_NAME = AGENT_NAME || cfg.CLMUX_AGENT || 'codex-worker';
+          AGENT_NAME = AGENT_NAME || cfg.CLMUX_AGENT || '';
           break;
         }
-      } catch (_) {}
+      } catch (e) {
+        process.stderr.write('[clmux-bridge] fallback scan error (file): ' + e.message + '\n');
+      }
     }
-  } catch (_) {}
+  } catch (e) {
+    process.stderr.write('[clmux-bridge] fallback scan error: ' + e.message + '\n');
+  }
 }
-if (!AGENT_NAME) AGENT_NAME = 'gemini-worker';
 
 // ── Flush queued messages now that config is ready ──────────────────────────
 
@@ -134,6 +151,12 @@ function atomicWrite(filePath, data) {
 function writeToLeadImpl(text, summary) {
   if (!OUTBOX) {
     return 'error: CLMUX_OUTBOX not set';
+  }
+  if (!validateOutboxPath(OUTBOX)) {
+    return 'error: CLMUX_OUTBOX path is invalid or outside allowed directory';
+  }
+  if (!AGENT_NAME) {
+    return 'error: AGENT_NAME not set (pass --agent or set CLMUX_AGENT)';
   }
   try {
     let msgs = [];

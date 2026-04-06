@@ -7,7 +7,10 @@ outbox_path = os.path.join(os.path.dirname(inbox_path), 'team-lead.json')
 try:
     with open(outbox_path) as f:
         msgs = json.load(f)
-except Exception:
+except FileNotFoundError:
+    msgs = []
+except json.JSONDecodeError as e:
+    print(f"notify_shutdown: JSON parse error in {outbox_path}: {e}", file=sys.stderr)
     msgs = []
 
 now = datetime.datetime.now(datetime.timezone.utc)

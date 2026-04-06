@@ -215,13 +215,15 @@ _clmux_spawn_agent_in_session() {
   python3 "$CLMUX_DIR/scripts/update_pane.py" "$team_dir" "$agent_name" "$agent_pane" "$cli_cmd"
 
   if [[ "$needs_env_file" -eq 1 ]]; then
-    printf 'CLMUX_OUTBOX=%s\nCLMUX_AGENT=%s\n' "$outbox" "$agent_name" > "$team_dir/.bridge-${agent_name}.env"
+    local team_name_val="${team_dir##*/}"
+    printf 'CLMUX_OUTBOX=%s\nCLMUX_AGENT=%s\nCLMUX_TEAM=%s\n' "$outbox" "$agent_name" "$team_name_val" > "$team_dir/.bridge-${agent_name}.env"
   fi
 
   [[ -f "$CLMUX_DIR/clmux-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
+  local team_name_val="${team_dir##*/}"
   zsh "$CLMUX_DIR/clmux-bridge.zsh" \
     -p "$agent_pane" -i "$inbox" -t "$timeout" -w "$idle_pattern" -m "$input_method" \
-    >> "/tmp/clmux-bridge-${agent_name}.log" 2>&1 &
+    >> "/tmp/clmux-bridge-${team_name_val}-${agent_name}.log" 2>&1 &
   echo $! > "$pid_file"
   disown
 
@@ -268,8 +270,8 @@ _clmux_spawn_agent() {
   local pane_file="$team_dir/.${agent_name}-pane"
 
   mkdir -p "$inbox_dir"
-  echo '[]' > "$inbox"
-  echo '[]' > "$outbox"
+  [[ -f "$inbox" ]]  || echo '[]' > "$inbox"
+  [[ -f "$outbox" ]] || echo '[]' > "$outbox"
 
   local lead_pane="${TMUX_PANE}"
 
@@ -309,7 +311,8 @@ _clmux_spawn_agent() {
   python3 "$CLMUX_DIR/scripts/update_pane.py" "$team_dir" "$agent_name" "$agent_pane" "$cli_cmd"
 
   if [[ "$needs_env_file" -eq 1 ]]; then
-    printf 'CLMUX_OUTBOX=%s\nCLMUX_AGENT=%s\n' "$outbox" "$agent_name" > "$team_dir/.bridge-${agent_name}.env"
+    local team_name_val="${team_dir##*/}"
+    printf 'CLMUX_OUTBOX=%s\nCLMUX_AGENT=%s\nCLMUX_TEAM=%s\n' "$outbox" "$agent_name" "$team_name_val" > "$team_dir/.bridge-${agent_name}.env"
   fi
 
   if [[ -z "$CLMUX_DIR" || ! -f "$CLMUX_DIR/clmux-bridge.zsh" ]]; then
@@ -318,9 +321,10 @@ _clmux_spawn_agent() {
     done
   fi
   [[ -f "$CLMUX_DIR/clmux-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
+  local team_name_val="${team_dir##*/}"
   zsh "$CLMUX_DIR/clmux-bridge.zsh" \
     -p "$agent_pane" -i "$inbox" -t "$timeout" -w "$idle_pattern" -m "$input_method" \
-    >> "/tmp/clmux-bridge-${agent_name}.log" 2>&1 &
+    >> "/tmp/clmux-bridge-${team_name_val}-${agent_name}.log" 2>&1 &
   echo $! > "$pid_file"
   disown
 

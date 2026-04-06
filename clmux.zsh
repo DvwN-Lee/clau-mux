@@ -29,9 +29,11 @@ clmux() {
   local session_name=""
   local -a clmux_args=()
   local gemini_flag=0
-  local gemini_team=""
+  local codex_flag=0
+  local copilot_flag=0
+  local spawn_team=""
 
-  # 인자 파싱: -n <name>은 세션 이름, -g는 Gemini 스폰, -T <team>은 팀 이름 지정, 나머지는 Claude Code에 전달
+  # 인자 파싱: -n <name>은 세션 이름, -g/-x/-c는 각 AI 스폰, -T <team>은 팀 이름, 나머지는 Claude Code에 전달
   local args=("$@")
   local i=1
   while [[ $i -le ${#args[@]} ]]; do
@@ -45,12 +47,18 @@ clmux() {
     elif [[ "${args[$i]}" == "-g" ]]; then
       gemini_flag=1
       ((i++))
+    elif [[ "${args[$i]}" == "-x" ]]; then
+      codex_flag=1
+      ((i++))
+    elif [[ "${args[$i]}" == "-c" ]]; then
+      copilot_flag=1
+      ((i++))
     elif [[ "${args[$i]}" == "-T" ]]; then
       if [[ $((i+1)) -gt ${#args[@]} ]] || [[ "${args[$((i+1))]}" == -* ]]; then
         echo "error: -T requires a team name." >&2
         return 1
       fi
-      gemini_team="${args[$((i+1))]}"
+      spawn_team="${args[$((i+1))]}"
       ((i+=2))
     else
       clmux_args+=("${args[$i]}")
@@ -60,11 +68,36 @@ clmux() {
 
   # tmux 내부: 세션 관리 없이 바로 실행
   if [[ -n "$TMUX" ]]; then
-    if [[ "$gemini_flag" -eq 1 ]]; then
-      local g_team="${gemini_team:-$(tmux display-message -p '#{session_name}')}"
-      local g_team_dir="$HOME/.claude/teams/$g_team"
-      _clmux_ensure_team "$g_team_dir" "$g_team"
-      _clmux_spawn_agent gemini gemini-worker "Type your message" keys 0 colour33 -t "$g_team"
+    local _team="${spawn_team:-$(tmux display-message -p '#{session_name}')}"
+    local _team_dir="$HOME/.claude/teams/$_team"
+
+    if [[ "$gemini_flag" -eq 1 ]] && _clmux_agent_enabled gemini; then
+      _clmux_ensure_team "$_team_dir" "$_team"
+      _clmux_spawn_agent gemini gemini-worker "Type your message" keys 0 colour33 -t "$_team"
+    fi
+    if [[ "$codex_flag" -eq 1 ]] && _clmux_agent_enabled codex; then
+      _clmux_ensure_team "$_team_dir" "$_team"
+      echo '' | npx -y clau-mux-bridge &>/dev/null
+      _clmux_spawn_agent "codex -a never" codex-worker "›" paste 1 colour36 -t "$_team"
+    fi
+    if [[ "$copilot_flag" -eq 1 ]] && _clmux_agent_enabled copilot; then
+      local _cp_outbox="$_team_dir/inboxes/team-lead.json"
+      _clmux_ensure_team "$_team_dir" "$_team"
+      [[ ! -f "$_cp_outbox" ]] && echo '[]' > "$_cp_outbox"
+      local _cp_port
+      _cp_port=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
+      CLMUX_OUTBOX="$_cp_outbox" CLMUX_AGENT="copilot-worker" \
+        node "$CLMUX_DIR/bridge-mcp-server.js" --http "$_cp_port" \
+        >> "/tmp/clmux-mcp-http-${_team}-copilot-worker.log" 2>&1 &
+      printf '%s\n' "$!" > "$_team_dir/.copilot-worker-mcp-http.pid"
+      disown
+      local _cp_tries=0
+      until curl -sf "http://127.0.0.1:${_cp_port}/sse" -o /dev/null --max-time 0.2 2>/dev/null \
+          || (( _cp_tries++ >= 10 )); do
+        sleep 0.2
+      done
+      python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${_cp_port}/sse"
+      _clmux_spawn_agent "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 -t "$_team"
     fi
     command claude "${clmux_args[@]}"
     return
@@ -79,6 +112,10 @@ clmux() {
       dir_hash=$(printf '%s' "$PWD" | md5 | head -c 6)
     fi
     session_name="$dir_hash"
+  else
+    # -n으로 지정된 이름에 디렉토리 basename prefix 추가하여 충돌 방지
+    local dir_basename="${PWD##*/}"
+    session_name="${dir_basename}/${session_name}"
   fi
 
   # clmux_args를 shell 명령 문자열로 직렬화 (공백/특수문자 안전 처리)
@@ -128,17 +165,45 @@ clmux() {
   ) &>/dev/null &
   disown
 
-  # Gemini 스폰 (-g 플래그)
-  if [[ "$gemini_flag" -eq 1 ]]; then
-    local g_team="${gemini_team:-$session_name}"
-    local g_team_dir="$HOME/.claude/teams/$g_team"
-    local g_inbox_dir="$g_team_dir/inboxes"
+  # Teammate 스폰 (-g/-x/-c 플래그)
+  local _st_team="${spawn_team:-$session_name}"
+  local _st_dir="$HOME/.claude/teams/$_st_team"
+  local _st_inbox_dir="$_st_dir/inboxes"
 
-    _clmux_ensure_team "$g_team_dir" "$g_team"
-    [[ ! -f "$g_inbox_dir/gemini-worker.json" ]] && echo '[]' > "$g_inbox_dir/gemini-worker.json"
-    [[ ! -f "$g_inbox_dir/team-lead.json" ]]    && echo '[]' > "$g_inbox_dir/team-lead.json"
+  if [[ "$gemini_flag" -eq 1 ]] && _clmux_agent_enabled gemini; then
+    _clmux_ensure_team "$_st_dir" "$_st_team"
+    [[ ! -f "$_st_inbox_dir/gemini-worker.json" ]] && echo '[]' > "$_st_inbox_dir/gemini-worker.json"
+    [[ ! -f "$_st_inbox_dir/team-lead.json" ]]    && echo '[]' > "$_st_inbox_dir/team-lead.json"
+    _clmux_spawn_agent_in_session "$session_name" gemini gemini-worker "Type your message" keys 0 colour33 "$_st_team"
+  fi
 
-    _clmux_spawn_agent_in_session "$session_name" gemini gemini-worker "Type your message" keys 0 colour33 "$g_team"
+  if [[ "$codex_flag" -eq 1 ]] && _clmux_agent_enabled codex; then
+    _clmux_ensure_team "$_st_dir" "$_st_team"
+    [[ ! -f "$_st_inbox_dir/codex-worker.json" ]] && echo '[]' > "$_st_inbox_dir/codex-worker.json"
+    [[ ! -f "$_st_inbox_dir/team-lead.json" ]]    && echo '[]' > "$_st_inbox_dir/team-lead.json"
+    echo '' | npx -y clau-mux-bridge &>/dev/null
+    _clmux_spawn_agent_in_session "$session_name" "codex -a never" codex-worker "›" paste 1 colour36 "$_st_team"
+  fi
+
+  if [[ "$copilot_flag" -eq 1 ]] && _clmux_agent_enabled copilot; then
+    local _cp2_outbox="$_st_inbox_dir/team-lead.json"
+    _clmux_ensure_team "$_st_dir" "$_st_team"
+    [[ ! -f "$_st_inbox_dir/copilot-worker.json" ]] && echo '[]' > "$_st_inbox_dir/copilot-worker.json"
+    [[ ! -f "$_cp2_outbox" ]] && echo '[]' > "$_cp2_outbox"
+    local _cp2_port
+    _cp2_port=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
+    CLMUX_OUTBOX="$_cp2_outbox" CLMUX_AGENT="copilot-worker" \
+      node "$CLMUX_DIR/bridge-mcp-server.js" --http "$_cp2_port" \
+      >> "/tmp/clmux-mcp-http-${_st_team}-copilot-worker.log" 2>&1 &
+    printf '%s\n' "$!" > "$_st_dir/.copilot-worker-mcp-http.pid"
+    disown
+    local _cp2_tries=0
+    until curl -sf "http://127.0.0.1:${_cp2_port}/sse" -o /dev/null --max-time 0.2 2>/dev/null \
+        || (( _cp2_tries++ >= 10 )); do
+      sleep 0.2
+    done
+    python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${_cp2_port}/sse"
+    _clmux_spawn_agent_in_session "$session_name" "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 "$_st_team"
   fi
 
   tmux attach-session -t "=$session_name"
@@ -364,6 +429,15 @@ _clmux_stop_agent() {
     echo "[${prefix}-stop] no bridge PID found for $agent_name"
   fi
 
+  # Kill HTTP MCP server if present (Copilot)
+  local http_pid_file="$team_dir/.${agent_name}-mcp-http.pid"
+  if [[ -f "$http_pid_file" ]]; then
+    local http_pid
+    http_pid=$(< "$http_pid_file")
+    kill "$http_pid" 2>/dev/null && echo "[${prefix}-stop] HTTP MCP server PID $http_pid stopped"
+    rm -f "$http_pid_file"
+  fi
+
   if [[ -f "$pane_file" ]]; then
     local pane_id
     pane_id=$(< "$pane_file")
@@ -382,33 +456,107 @@ _clmux_stop_agent() {
   fi
 }
 
+# ── _clmux_agent_enabled ──────────────────────────────────────────────────────
+_clmux_agent_enabled() {
+  local agent="$1"
+  local config="$CLMUX_DIR/.agents-enabled"
+  [[ ! -f "$config" ]] && return 0
+  local key="${agent:u}_ENABLED"
+  local val=$(grep "^${key}=" "$config" 2>/dev/null | cut -d= -f2)
+  [[ "$val" != "0" ]]
+}
+
 # ── Public wrappers ───────────────────────────────────────────────────────────
 
-clmux-gemini() {
-  # Spawns a Gemini CLI tmux pane as a Claude Code teammate.
-  # Usage: clmux-gemini -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
-  _clmux_spawn_agent gemini gemini-worker "Type your message" keys 0 colour33 "$@"
-}
+if _clmux_agent_enabled gemini; then
+  clmux-gemini() {
+    # Spawns a Gemini CLI tmux pane as a Claude Code teammate.
+    # Usage: clmux-gemini -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
+    _clmux_spawn_agent gemini gemini-worker "Type your message" keys 0 colour33 "$@"
+  }
 
-clmux-gemini-stop() {
-  # Stops the Gemini bridge and closes the Gemini pane.
-  # Usage: clmux-gemini-stop -t <team_name> [-n <agent_name>]
-  _clmux_stop_agent clmux-gemini gemini-worker "$@"
-}
+  clmux-gemini-stop() {
+    # Stops the Gemini bridge and closes the Gemini pane.
+    # Usage: clmux-gemini-stop -t <team_name> [-n <agent_name>]
+    _clmux_stop_agent clmux-gemini gemini-worker "$@"
+  }
+fi
 
-clmux-codex() {
-  # Spawns a Codex CLI tmux pane as a Claude Code teammate.
-  # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
-  # Pre-warm npx cache so MCP server starts instantly when Codex initializes
-  echo '' | npx -y clau-mux-bridge &>/dev/null
-  _clmux_spawn_agent "codex -a never" codex-worker "›" paste 1 colour36 "$@"
-}
+if _clmux_agent_enabled codex; then
+  clmux-codex() {
+    # Spawns a Codex CLI tmux pane as a Claude Code teammate.
+    # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
+    # Pre-warm npx cache so MCP server starts instantly when Codex initializes
+    echo '' | npx -y clau-mux-bridge &>/dev/null
+    _clmux_spawn_agent "codex -a never" codex-worker "›" paste 1 colour36 "$@"
+  }
 
-clmux-codex-stop() {
-  # Stops the Codex bridge and closes the Codex pane.
-  # Usage: clmux-codex-stop -t <team_name> [-n <agent_name>]
-  _clmux_stop_agent clmux-codex codex-worker "$@"
-}
+  clmux-codex-stop() {
+    # Stops the Codex bridge and closes the Codex pane.
+    # Usage: clmux-codex-stop -t <team_name> [-n <agent_name>]
+    _clmux_stop_agent clmux-codex codex-worker "$@"
+  }
+fi
+
+if _clmux_agent_enabled copilot; then
+  clmux-copilot() {
+    # Spawns a Copilot CLI tmux pane as a Claude Code teammate.
+    # Usage: clmux-copilot -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
+    #
+    # Copilot CLI only supports HTTP/SSE MCP servers (requires url field).
+    # We start bridge-mcp-server.js in HTTP mode on a free port, write the URL
+    # to ~/.copilot/mcp-config.json, then spawn the Copilot pane.
+
+    # Pre-parse -t/-n without consuming "$@" for _clmux_spawn_agent.
+    local team_name="" agent_name="copilot-worker"
+    local _arg _next_t=0 _next_n=0
+    for _arg in "$@"; do
+      if   (( _next_t )); then team_name="$_arg";   _next_t=0
+      elif (( _next_n )); then agent_name="$_arg";  _next_n=0
+      elif [[ "$_arg" == "-t" ]]; then _next_t=1
+      elif [[ "$_arg" == "-n" ]]; then _next_n=1
+      fi
+    done
+
+    [[ -z "$team_name" ]] && { echo "error: -t <team_name> required" >&2; return 1; }
+
+    local team_dir="$HOME/.claude/teams/$team_name"
+    local outbox="$team_dir/inboxes/team-lead.json"
+    local http_pid_file="$team_dir/.${agent_name}-mcp-http.pid"
+
+    mkdir -p "$team_dir/inboxes"
+    [[ -f "$outbox" ]] || echo '[]' > "$outbox"
+
+    # Find a free port
+    local port
+    port=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
+
+    # Start HTTP MCP server in background
+    CLMUX_OUTBOX="$outbox" CLMUX_AGENT="$agent_name" \
+      node "$CLMUX_DIR/bridge-mcp-server.js" --http "$port" \
+      >> "/tmp/clmux-mcp-http-${team_name}-${agent_name}.log" 2>&1 &
+    echo $! > "$http_pid_file"
+    disown
+
+    # Wait up to 2s for server to be ready
+    local tries=0
+    until curl -sf "http://127.0.0.1:${port}/sse" -o /dev/null --max-time 0.2 2>/dev/null \
+        || (( tries++ >= 10 )); do
+      sleep 0.2
+    done
+
+    # Register URL in Copilot mcp-config.json
+    python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${port}/sse"
+
+    _clmux_spawn_agent "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 "$@"
+  }
+
+  clmux-copilot-stop() {
+    # Stops the Copilot bridge and closes the Copilot pane.
+    # Usage: clmux-copilot-stop -t <team_name> [-n <agent_name>]
+    _clmux_stop_agent clmux-copilot copilot-worker "$@"
+  }
+fi
 
 clmux-ls() {
   local sessions

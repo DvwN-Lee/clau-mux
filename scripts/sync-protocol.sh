@@ -36,5 +36,22 @@ generate() {
   echo "generated: $output_file"
 }
 
-generate "gemini-worker" "$REPO_DIR/GEMINI.md"
-generate "codex-worker"  "$REPO_DIR/AGENTS.md" "$CODEX_EXTRA"
+# Parse args
+gen_gemini=0
+gen_codex=0
+gen_copilot=0
+if [[ $# -eq 0 ]]; then
+  gen_gemini=1; gen_codex=1; gen_copilot=1  # 인자 없으면 전부 생성 (하위호환)
+else
+  for arg in "$@"; do
+    case "$arg" in
+      --gemini)  gen_gemini=1 ;;
+      --codex)   gen_codex=1 ;;
+      --copilot) gen_copilot=1 ;;
+    esac
+  done
+fi
+
+[[ "$gen_gemini" -eq 1 ]]  && generate "gemini-worker"  "$REPO_DIR/GEMINI.md"
+[[ "$gen_codex" -eq 1 ]]   && generate "codex-worker"   "$REPO_DIR/AGENTS.md" "$CODEX_EXTRA"
+[[ "$gen_copilot" -eq 1 ]] && generate "copilot-worker" "$REPO_DIR/COPILOT.md"

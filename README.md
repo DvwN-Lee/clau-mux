@@ -25,7 +25,7 @@ flowchart LR
     outbox[outbox.json]
   end
 
-  subgraph Teammates
+  subgraph Teammates["Teammates (선택적)"]
     G[Gemini CLI]
     X[Codex CLI]
     P[Copilot CLI]
@@ -33,12 +33,12 @@ flowchart LR
 
   CC -- "SendMessage" --> inbox
   inbox -- "polling 2s" --> bridge
-  bridge -- "send-keys" --> G
-  bridge -- "paste-buffer" --> X
-  bridge -- "paste-buffer" --> P
-  G -- "write_to_lead (MCP)" --> mcp
-  X -- "write_to_lead (MCP)" --> mcp
-  P -- "write_to_lead (MCP/HTTP)" --> mcp
+  bridge -. "send-keys" .-> G
+  bridge -. "paste-buffer" .-> X
+  bridge -. "paste-buffer" .-> P
+  G -. "write_to_lead (MCP)" .-> mcp
+  X -. "write_to_lead (MCP)" .-> mcp
+  P -. "write_to_lead (MCP/HTTP)" .-> mcp
   mcp --> outbox
   outbox -- "teammate-message" --> CC
 ```

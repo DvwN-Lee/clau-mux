@@ -138,7 +138,7 @@ tail -50 /tmp/clmux-bridge-codex-worker.log
 일반적인 원인:
 
 - MCP 서버 미등록: `scripts/setup.sh` 재실행
-- Codex MCP Tools: (none): npx 패키지 캐시 미확보로 MCP 서버 초기화 timeout — `clmux-codex`는 spawn 전에 npx 캐시를 pre-warm하여 이를 방지
+- Codex MCP Tools: (none): 서버명 하이픈 정규화 버그 (Codex CLI가 내부적으로 하이픈→언더스코어 변환하여 UI 조회 불일치 발생) — config.toml에서 `clau_mux_bridge` (언더스코어) 사용으로 해결
 - Gemini MCP 초기화 실패: `~/.gemini/settings.json` 확인
 - bridge idle 패턴 불일치: Codex는 `›` (U+203A), Gemini는 `Type your message`
 

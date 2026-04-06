@@ -17,13 +17,13 @@ if "mcpServers" not in settings:
     settings["mcpServers"] = {}
 
 if cmd == "npx":
-    settings["mcpServers"]["clau-mux-bridge"] = {
+    settings["mcpServers"]["clau_mux_bridge"] = {
         "command": "npx",
         "args": ["-y", "clau-mux-bridge"],
         "trust": True,
     }
 else:
-    settings["mcpServers"]["clau-mux-bridge"] = {
+    settings["mcpServers"]["clau_mux_bridge"] = {
         "command": "node",
         "args": [cmd],
         "trust": True,

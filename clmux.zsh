@@ -66,6 +66,15 @@ clmux() {
     fi
   done
 
+  # CLMUX_PLUGIN_DIR 하위의 유효한 플러그인(.claude-plugin/ 존재)을 모두 --plugin-dir로 주입
+  if [[ -n "$CLMUX_PLUGIN_DIR" ]]; then
+    local _plugin_args=()
+    for _pd in "$CLMUX_PLUGIN_DIR"/*/; do
+      [[ -d "$_pd/.claude-plugin" ]] && _plugin_args+=("--plugin-dir" "${_pd%/}")
+    done
+    clmux_args=("${_plugin_args[@]}" "${clmux_args[@]}")
+  fi
+
   # tmux 내부: 세션 관리 없이 바로 실행
   if [[ -n "$TMUX" ]]; then
     local _team="${spawn_team:-$(tmux display-message -p '#{session_name}')}"
@@ -77,7 +86,8 @@ clmux() {
     fi
     if [[ "$codex_flag" -eq 1 ]] && _clmux_agent_enabled codex; then
       _clmux_ensure_team "$_team_dir" "$_team"
-      echo '' | npx -y clau-mux-bridge &>/dev/null
+      python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
+        --outbox "$_team_dir/inboxes/team-lead.json" --agent codex-worker &>/dev/null
       _clmux_spawn_agent "codex -a never" codex-worker "›" paste 1 colour36 -t "$_team"
     fi
     if [[ "$copilot_flag" -eq 1 ]] && _clmux_agent_enabled copilot; then
@@ -181,7 +191,8 @@ clmux() {
     _clmux_ensure_team "$_st_dir" "$_st_team"
     [[ ! -f "$_st_inbox_dir/codex-worker.json" ]] && echo '[]' > "$_st_inbox_dir/codex-worker.json"
     [[ ! -f "$_st_inbox_dir/team-lead.json" ]]    && echo '[]' > "$_st_inbox_dir/team-lead.json"
-    echo '' | npx -y clau-mux-bridge &>/dev/null
+    python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
+      --outbox "$_st_inbox_dir/team-lead.json" --agent codex-worker &>/dev/null
     _clmux_spawn_agent_in_session "$session_name" "codex -a never" codex-worker "›" paste 1 colour36 "$_st_team"
   fi
 
@@ -340,6 +351,11 @@ _clmux_spawn_agent() {
 
   local lead_pane="${TMUX_PANE}"
 
+  # Codex: update config.toml BEFORE pane spawn (env_clear() strips PATH/HOME)
+  if [[ "${cli_cmd%% *}" == "codex" ]]; then
+    python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" --outbox "$outbox" --agent "$agent_name" &>/dev/null
+  fi
+
   local pane_count
   pane_count=$(tmux list-panes -F '#{pane_id}' | wc -l | tr -d ' ')
 
@@ -486,8 +502,6 @@ if _clmux_agent_enabled codex; then
   clmux-codex() {
     # Spawns a Codex CLI tmux pane as a Claude Code teammate.
     # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
-    # Pre-warm npx cache so MCP server starts instantly when Codex initializes
-    echo '' | npx -y clau-mux-bridge &>/dev/null
     _clmux_spawn_agent "codex -a never" codex-worker "›" paste 1 colour36 "$@"
   }
 
@@ -548,7 +562,7 @@ if _clmux_agent_enabled copilot; then
     # Register URL in Copilot mcp-config.json
     python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${port}/sse"
 
-    _clmux_spawn_agent "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 "$@"
+    _clmux_spawn_agent "copilot --allow-all-tools" copilot-worker "Enter @ to mention" paste 1 colour98 "$@"
   }
 
   clmux-copilot-stop() {

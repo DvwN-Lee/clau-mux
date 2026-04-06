@@ -178,6 +178,14 @@ function buildResponse(msg) {
     return { jsonrpc: '2.0', id, result: { tools: [TOOL_SCHEMA] } };
   }
 
+  if (method === 'resources/list') {
+    return { jsonrpc: '2.0', id, result: { resources: [] } };
+  }
+
+  if (method === 'resources/templates/list') {
+    return { jsonrpc: '2.0', id, result: { resourceTemplates: [] } };
+  }
+
   if (method === 'tools/call') {
     const params = msg.params || {};
     if (params.name === 'write_to_lead') {

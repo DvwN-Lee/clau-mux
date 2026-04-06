@@ -22,7 +22,7 @@ Copilot CLI가 설치 및 인증되어 있어야 합니다 (`copilot` 명령 사
 ```json
 {
   "mcpServers": {
-    "clau-mux-bridge": {
+    "clau_mux_bridge": {
       "url": "http://127.0.0.1:<port>/sse"
     }
   }

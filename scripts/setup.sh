@@ -61,7 +61,7 @@ if [[ "$gemini_answer" =~ ^[Yy]$ ]]; then
   GEMINI_ENABLED=1
   if command -v gemini >/dev/null 2>&1; then
     python3 "$CLMUX_DIR/scripts/setup_gemini_mcp.py" npx
-    echo "[OK]   Registered clau-mux-bridge (npx) in ~/.gemini/settings.json"
+    echo "[OK]   Registered clau_mux_bridge (npx) in ~/.gemini/settings.json"
   else
     echo "[WARN] gemini CLI not found — install it to use Gemini teammate"
   fi
@@ -79,13 +79,8 @@ codex_answer="${codex_answer:-Y}"
 if [[ "$codex_answer" =~ ^[Yy]$ ]]; then
   CODEX_ENABLED=1
   if command -v codex >/dev/null 2>&1; then
-    CODEX_CONFIG="$HOME/.codex/config.toml"
-    if [[ -f "$CODEX_CONFIG" ]] && grep -q "clau-mux-bridge" "$CODEX_CONFIG" 2>/dev/null; then
-      echo "[SKIP] clau-mux-bridge already registered in codex config"
-    else
-      codex mcp add clau-mux-bridge -- npx -y clau-mux-bridge
-      echo "[OK]   Registered clau-mux-bridge (npx) in codex"
-    fi
+    python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py"
+    echo "[OK]   Registered clau_mux_bridge (npx) in codex"
   else
     echo "[WARN] codex CLI not found — install it to use Codex teammate"
   fi
@@ -104,7 +99,7 @@ if [[ "$copilot_answer" =~ ^[Yy]$ ]]; then
   COPILOT_ENABLED=1
   if command -v copilot >/dev/null 2>&1; then
     python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" npx
-    echo "[OK]   Registered clau-mux-bridge (npx) in ~/.copilot/mcp-config.json"
+    echo "[OK]   Registered clau_mux_bridge (npx) in ~/.copilot/mcp-config.json"
   else
     echo "[WARN] copilot CLI not found — install @github/copilot to use Copilot teammate"
   fi

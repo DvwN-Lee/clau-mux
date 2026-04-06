@@ -21,19 +21,19 @@ if "mcpServers" not in settings:
 TOOLS = ["write_to_lead"]
 
 if cmd.startswith("http"):
-    settings["mcpServers"]["clau-mux-bridge"] = {
+    settings["mcpServers"]["clau_mux_bridge"] = {
         "type": "sse",
         "url": cmd,
         "tools": TOOLS,
     }
 elif cmd == "npx":
-    settings["mcpServers"]["clau-mux-bridge"] = {
+    settings["mcpServers"]["clau_mux_bridge"] = {
         "command": "npx",
         "args": ["-y", "clau-mux-bridge"],
         "tools": TOOLS,
     }
 else:
-    settings["mcpServers"]["clau-mux-bridge"] = {
+    settings["mcpServers"]["clau_mux_bridge"] = {
         "command": "node",
         "args": [cmd],
         "tools": TOOLS,

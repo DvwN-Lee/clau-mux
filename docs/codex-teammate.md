@@ -20,7 +20,7 @@ Codex CLI가 설치 및 인증되어 있어야 합니다 (`codex` 명령 사용 
 수동 등록이 필요한 경우:
 
 ```toml
-[mcp_servers.clau-mux-bridge]
+[mcp_servers.clau_mux_bridge]
 command = "npx"
 args = ["-y", "clau-mux-bridge"]
 ```

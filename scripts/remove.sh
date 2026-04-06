@@ -54,16 +54,16 @@ update_agents_enabled() {
 remove_gemini() {
   echo "--- Removing Gemini teammate ---"
 
-  # MCP: remove clau-mux-bridge from ~/.gemini/settings.json
+  # MCP: remove clau_mux_bridge from ~/.gemini/settings.json
   local gemini_settings="$HOME/.gemini/settings.json"
   if [[ -f "$gemini_settings" ]]; then
     python3 -c "
 import json, sys
 p = '$gemini_settings'
 with open(p) as f: s = json.load(f)
-if 'mcpServers' in s: s['mcpServers'].pop('clau-mux-bridge', None)
+if 'mcpServers' in s: s['mcpServers'].pop('clau_mux_bridge', None); s['mcpServers'].pop('clau-mux-bridge', None)
 with open(p, 'w') as f: json.dump(s, f, indent=2)
-" && echo "[OK]   Removed clau-mux-bridge from ~/.gemini/settings.json" \
+" && echo "[OK]   Removed clau_mux_bridge from ~/.gemini/settings.json" \
     || echo "[WARN] Could not update ~/.gemini/settings.json"
   else
     echo "[SKIP] ~/.gemini/settings.json not found"
@@ -88,18 +88,14 @@ with open(p, 'w') as f: json.dump(s, f, indent=2)
 remove_codex() {
   echo "--- Removing Codex teammate ---"
 
-  # MCP: remove clau-mux-bridge from ~/.codex/config.toml
+  # MCP: remove clau_mux_bridge from ~/.codex/config.toml
   local codex_config="$HOME/.codex/config.toml"
-  if [[ -f "$codex_config" ]] && grep -q "clau-mux-bridge" "$codex_config" 2>/dev/null; then
-    if command -v codex >/dev/null 2>&1; then
-      codex mcp remove clau-mux-bridge 2>/dev/null \
-        && echo "[OK]   Removed clau-mux-bridge from codex config" \
-        || echo "[WARN] codex mcp remove failed — manually edit ~/.codex/config.toml"
-    else
-      echo "[WARN] codex CLI not found — manually remove clau-mux-bridge from ~/.codex/config.toml"
-    fi
+  if [[ -f "$codex_config" ]] && grep -qE "clau[-_]mux[-_]bridge" "$codex_config" 2>/dev/null; then
+    python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" --remove 2>/dev/null \
+      && echo "[OK]   Removed clau_mux_bridge from codex config" \
+      || echo "[WARN] Could not update ~/.codex/config.toml"
   else
-    echo "[SKIP] clau-mux-bridge not found in codex config"
+    echo "[SKIP] clau_mux_bridge not found in codex config"
   fi
 
   # Protocol doc
@@ -121,16 +117,16 @@ remove_codex() {
 remove_copilot() {
   echo "--- Removing Copilot teammate ---"
 
-  # MCP: remove clau-mux-bridge from ~/.copilot/mcp-config.json
+  # MCP: remove clau_mux_bridge from ~/.copilot/mcp-config.json
   local copilot_mcp="$HOME/.copilot/mcp-config.json"
   if [[ -f "$copilot_mcp" ]]; then
     python3 -c "
 import json
 p = '$copilot_mcp'
 with open(p) as f: s = json.load(f)
-if 'mcpServers' in s: s['mcpServers'].pop('clau-mux-bridge', None)
+if 'mcpServers' in s: s['mcpServers'].pop('clau_mux_bridge', None); s['mcpServers'].pop('clau-mux-bridge', None)
 with open(p, 'w') as f: json.dump(s, f, indent=2)
-" && echo "[OK]   Removed clau-mux-bridge from ~/.copilot/mcp-config.json" \
+" && echo "[OK]   Removed clau_mux_bridge from ~/.copilot/mcp-config.json" \
     || echo "[WARN] Could not update ~/.copilot/mcp-config.json"
   else
     echo "[SKIP] ~/.copilot/mcp-config.json not found"

@@ -149,7 +149,7 @@ $ clmux-cleanup
 
 ### Gemini Teammate
 
-Gemini CLI를 Claude Code의 teammate로 연결합니다. `clmux-bridge.zsh`가 중계 역할을 하며, Gemini는 MCP 도구(`clau-mux-bridge`)를 통해 lead에 응답합니다.
+Gemini CLI를 Claude Code의 teammate로 연결합니다. `clmux-bridge.zsh`가 중계 역할을 하며, Gemini는 MCP 도구(`clau_mux_bridge`)를 통해 lead에 응답합니다.
 
 ```bash
 # 터미널에서 Gemini teammate 시작
@@ -169,7 +169,7 @@ clmux-gemini-stop -t <team_name>
 
 ### Codex Teammate
 
-OpenAI Codex CLI를 Claude Code의 teammate로 연결합니다. Codex는 MCP 도구(`clau-mux-bridge`)를 통해 lead에 응답합니다.
+OpenAI Codex CLI를 Claude Code의 teammate로 연결합니다. Codex는 MCP 도구(`clau_mux_bridge`)를 통해 lead에 응답합니다.
 
 ```bash
 # 터미널에서 Codex teammate 시작

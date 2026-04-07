@@ -15,6 +15,13 @@ write_to_lead(text="<your full response>", summary="<one-line summary, ≤60 cha
 
 If you do not call `write_to_lead`, your response is lost and the team lead will assume you are unresponsive.
 
+## Task management
+
+When you receive a task assignment from the team lead via message, use Gemini's built-in `write_todos` tool to store it locally. This keeps your task list in sync with your own workflow.
+
+- Task 수신 시 → `write_todos`로 저장 (Ctrl+T로 확인 가능)
+- Task 완료 시 → `write_todos`로 상태 업데이트 후 `write_to_lead`로 결과 보고
+
 ## Rules
 
 1. Call `write_to_lead` once at the end of every response — no exceptions

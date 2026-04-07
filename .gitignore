@@ -3,3 +3,5 @@ ANALYSIS.md
 .claude/
 .gemini-mcp/
 docs/*-retrospective.md
+.worktrees/
+scripts/__pycache__/

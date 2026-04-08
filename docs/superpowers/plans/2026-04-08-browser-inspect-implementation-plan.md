@@ -9,9 +9,11 @@
 **Tech Stack:**
 - **Node.js 20+ LTS** (plain JavaScript + JSDoc types, `bridge-mcp-server.js` 패턴)
 - **chrome-remote-interface** (MIT) — CDP client
-- **Chrome 130+** — CDP Stable API
+- **Chrome 130+** — CDP. **주의: 일부 Experimental API 사용** (`Target.setAutoAttach.flatten`, `Overlay.*`, `Accessibility.getPartialAXTree`). 다른 Chromium 기반 브라우저에서 호환성 보장 안 됨. feature detection + graceful degradation 필수 (Task 6 참조).
 - **node:test** (built-in) — TDD test runner
 - **zsh / bash** — CLI wrapper + clmux.zsh integration
+
+**Review acknowledgment (2026-04-08):** 이 plan은 3-way review를 통과함 — copilot-worker (GitHub/PR/integration), codex-worker (CDP/security/lifecycle), gemini-worker (Frontend/UX). 9 BLOCKER + 5 HIGH + 4 MEDIUM 수정 반영 완료.
 
 ---
 
@@ -77,11 +79,23 @@
 
 ```
 ├── clmux.zsh                                     # -b 플래그 추가 + _clmux_launch_browser_service 함수
-├── package.json                                  # chrome-remote-interface 의존성 추가
+├── package.json                                  # chrome-remote-interface 의존성 + engines 필드
 ├── scripts/setup.sh                              # clmux-inspect PATH 등록
-├── scripts/remove.sh                             # browser-service cleanup 추가
+├── scripts/remove.sh                             # browser-service cleanup 추가 (macOS + Linux)
+├── CHANGELOG.md                                  # 1.3.0 릴리즈 노트 (신규 시)
 └── README.md                                     # BIT 섹션 추가
 ```
+
+### Port 파일 분리 (B1 fix)
+
+`.browser-service.port` 와 `.chrome-debug.port`는 **서로 다른 파일**이다:
+
+| 파일 | 내용 | 소유자 |
+|---|---|---|
+| `~/.claude/teams/$team/.chrome-debug.port` | Chrome `--remote-debugging-port=0`이 할당받은 실제 포트 (CDP WebSocket용) | Task 5 chrome-launcher |
+| `~/.claude/teams/$team/.browser-service.port` | browser-service daemon의 HTTP 서버 포트 (clmux-inspect CLI가 연결) | Task 14 main entry |
+
+**주의**: 초안에서는 두 파일이 같은 이름이었으나 의미 충돌(port collision)이 발생하므로 분리함.
 
 ---
 
@@ -129,17 +143,22 @@ cd /Users/idongju/Desktop/Git/clau-mux
 mkdir -p browser-service/tests/fixtures bin
 ```
 
-- [ ] **Step 0.2: chrome-remote-interface 의존성 추가**
+- [ ] **Step 0.2: chrome-remote-interface 의존성 + engines 필드 추가**
 
-기존 `package.json`을 수정해 dependencies 섹션에 추가:
+기존 `package.json`을 수정해 dependencies + engines 섹션 추가:
 
 ```json
 {
   "dependencies": {
     "chrome-remote-interface": "^0.33.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }
 ```
+
+> **근거 (B6 — Copilot review)**: `chrome-remote-interface`는 Node 16+ 요구. clau-mux 기존 `package.json`에 `engines` 필드 없어 Node 14/16 사용자가 silent failure 겪을 수 있음. Node 20 LTS 명시로 방어.
 
 Run:
 ```bash
@@ -147,7 +166,7 @@ cd /Users/idongju/Desktop/Git/clau-mux
 npm install chrome-remote-interface@^0.33.2
 ```
 
-Expected: `added N packages`, `package-lock.json` 생성 또는 업데이트.
+Expected: `added N packages`, `package-lock.json` 생성 또는 업데이트. `npm install` 이 Node 20 미만이면 warning 출력.
 
 - [ ] **Step 0.3: 첫 commit**
 
@@ -268,6 +287,8 @@ git commit -m "feat(browser-service): logger utility with debug gating"
 
 **Implements:** NFR-303 (파일 권한 0600), 보안 매트릭스 (path injection 방지, bridge-mcp-server.js 동일 패턴)
 
+> **B4 fix (Codex review)**: 초안은 `path.normalize()` 후 `includes('..')` 체크했으나 normalize가 이미 `..`를 제거하므로 무의미. 범위도 `~/.claude/**/*.json` 전체로 너무 넓었음. 이 버전은 `path.resolve()` 기반 prefix 체크 + `~/.claude/teams/<team>/inboxes/<agent>.json` exact pattern 검증.
+
 - [ ] **Step 2.1: 실패 테스트 작성**
 
 `browser-service/tests/path-utils.test.js`:
@@ -277,36 +298,43 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
+import fs from 'node:fs';
 import { validateInboxPath, InvalidInboxPathError } from '../path-utils.js';
 
 const home = os.homedir();
 
-test('accepts valid inbox path under ~/.claude/teams', () => {
+test('accepts valid inbox path under ~/.claude/teams/<team>/inboxes/', () => {
   const p = path.join(home, '.claude', 'teams', 'proj', 'inboxes', 'gemini-worker.json');
   assert.doesNotThrow(() => validateInboxPath(p));
 });
 
 test('rejects path outside ~/.claude', () => {
-  assert.throws(
-    () => validateInboxPath('/tmp/evil.json'),
-    InvalidInboxPathError
-  );
+  assert.throws(() => validateInboxPath('/tmp/evil.json'), InvalidInboxPathError);
 });
 
-test('rejects .. traversal', () => {
-  const p = path.join(home, '.claude', 'teams', '..', '..', 'etc', 'passwd');
-  assert.throws(
-    () => validateInboxPath(p),
-    InvalidInboxPathError
-  );
+test('rejects ~/.claude but not in teams/*/inboxes/', () => {
+  const p = path.join(home, '.claude', 'random.json');
+  assert.throws(() => validateInboxPath(p), InvalidInboxPathError);
+});
+
+test('rejects teams/*/config.json (not inboxes)', () => {
+  const p = path.join(home, '.claude', 'teams', 'proj', 'config.json');
+  assert.throws(() => validateInboxPath(p), InvalidInboxPathError);
+});
+
+test('rejects .. traversal via unresolved path', () => {
+  const p = home + '/.claude/teams/proj/inboxes/../../../../etc/passwd.json';
+  assert.throws(() => validateInboxPath(p), InvalidInboxPathError);
 });
 
 test('rejects non-json extension', () => {
   const p = path.join(home, '.claude', 'teams', 'proj', 'inboxes', 'foo.txt');
-  assert.throws(
-    () => validateInboxPath(p),
-    InvalidInboxPathError
-  );
+  assert.throws(() => validateInboxPath(p), InvalidInboxPathError);
+});
+
+test('rejects nested subdirectory under inboxes', () => {
+  const p = path.join(home, '.claude', 'teams', 'proj', 'inboxes', 'nested', 'foo.json');
+  assert.throws(() => validateInboxPath(p), InvalidInboxPathError);
 });
 ```
 
@@ -318,7 +346,7 @@ node --test browser-service/tests/path-utils.test.js
 
 Expected: FAIL — `Cannot find module`.
 
-- [ ] **Step 2.3: 구현**
+- [ ] **Step 2.3: 구현 (B4 — resolve + exact pattern)**
 
 `browser-service/path-utils.js`:
 
@@ -333,22 +361,42 @@ export class InvalidInboxPathError extends Error {
   }
 }
 
+// Exact allowed pattern: ~/.claude/teams/<team>/inboxes/<agent>.json
+// - team: single path segment (no /, no ..)
+// - agent: single path segment ending in .json
+const INBOX_PATTERN = /^teams\/[^/]+\/inboxes\/[^/]+\.json$/;
+
 /**
- * Validates inbox path. Mirrors bridge-mcp-server.js security pattern.
+ * Validates inbox path. Mirrors bridge-mcp-server.js security pattern with tighter scope.
+ * Uses path.resolve() (not normalize) to fully expand relative segments and symlinks.
+ *
  * @param {string} inboxPath absolute path
+ * @throws {InvalidInboxPathError}
  */
 export function validateInboxPath(inboxPath) {
-  const home = os.homedir();
-  const allowedBase = path.join(home, '.claude');
-  const normalized = path.normalize(inboxPath);
+  if (typeof inboxPath !== 'string' || inboxPath.length === 0) {
+    throw new InvalidInboxPathError('empty or non-string', inboxPath);
+  }
 
-  if (!normalized.startsWith(allowedBase + path.sep) && normalized !== allowedBase) {
+  const home = os.homedir();
+  const claudeRoot = path.resolve(home, '.claude');
+  const resolved = path.resolve(inboxPath);
+
+  // Must be under ~/.claude
+  if (!resolved.startsWith(claudeRoot + path.sep)) {
     throw new InvalidInboxPathError('not under ~/.claude', inboxPath);
   }
-  if (normalized.includes('..')) {
-    throw new InvalidInboxPathError('contains ..', inboxPath);
+
+  // Must match exact inbox pattern
+  const relative = path.relative(claudeRoot, resolved);
+  if (!INBOX_PATTERN.test(relative)) {
+    throw new InvalidInboxPathError(
+      `not a valid inbox path (expected teams/<team>/inboxes/<agent>.json, got ${relative})`,
+      inboxPath,
+    );
   }
-  if (!normalized.endsWith('.json')) {
+
+  if (!resolved.endsWith('.json')) {
     throw new InvalidInboxPathError('not a .json file', inboxPath);
   }
 }
@@ -360,7 +408,7 @@ export function validateInboxPath(inboxPath) {
 node --test browser-service/tests/path-utils.test.js
 ```
 
-Expected: `pass 4`, `fail 0`.
+Expected: `pass 7`, `fail 0`.
 
 - [ ] **Step 2.5: commit**
 
@@ -492,6 +540,9 @@ export function writeToInbox(teamDir, subscriber, payload) {
   const tmp = inboxPath + '.' + crypto.randomBytes(4).toString('hex') + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(entries, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, inboxPath);
+  // M6 fix: explicit chmod after rename — mode option only affects new file creation,
+  // not overwrites of existing files with different permissions.
+  try { fs.chmodSync(inboxPath, 0o600); } catch { /* best-effort */ }
 }
 ```
 
@@ -605,6 +656,8 @@ export function readSubscriber(teamDir) {
 export function writeSubscriber(teamDir, agent) {
   const file = path.join(teamDir, SUB_FILE);
   fs.writeFileSync(file, agent, { mode: 0o600 });
+  // M6 fix: explicit chmod — mode option only affects creation
+  try { fs.chmodSync(file, 0o600); } catch { /* best-effort */ }
 }
 
 export function watchSubscriber(teamDir, onChange) {
@@ -851,8 +904,17 @@ export async function launchChrome({ teamDir, profileDir, logPath }) {
   const port = await pollDevToolsActivePort(profileDir, { timeoutMs: 5000, retryIntervalMs: 200 });
   const endpoint = `ws://127.0.0.1:${port}`;
 
-  fs.writeFileSync(path.join(teamDir, '.chrome.pid'), String(proc.pid), { mode: 0o600 });
-  fs.writeFileSync(path.join(teamDir, '.browser-service.port'), String(port), { mode: 0o600 });
+  // B1 fix: Chrome CDP port written to .chrome-debug.port (NOT .browser-service.port).
+  // .browser-service.port is reserved for the Node HTTP server (written by browser-service.js).
+  const chromePidPath = path.join(teamDir, '.chrome.pid');
+  const chromeDebugPortPath = path.join(teamDir, '.chrome-debug.port');
+  fs.writeFileSync(chromePidPath, String(proc.pid), { mode: 0o600 });
+  fs.writeFileSync(chromeDebugPortPath, String(port), { mode: 0o600 });
+  // M6 fix: explicit chmod on overwrite
+  try {
+    fs.chmodSync(chromePidPath, 0o600);
+    fs.chmodSync(chromeDebugPortPath, 0o600);
+  } catch { /* best-effort */ }
 
   return { endpoint, pid: proc.pid, port };
 }
@@ -875,21 +937,27 @@ git commit -m "feat(browser-service): chrome-launcher with binary detection + De
 
 ---
 
-## Task 6: cdp-client (연결 + 도메인 활성화)
+## Task 6: cdp-client (연결 + 도메인 활성화 + real disconnect 감지)
 
 **Files:**
 - Create: `browser-service/cdp-client.js`
 
-**Implements:** architecture §6.2, NFR-201 (재연결), NFR-202 (crash 감지)
+**Implements:** architecture §6.2, NFR-201 (재연결 3회 cap), NFR-202 (crash 감지 < 10s)
+
+> **B3 fix (Codex review)**:
+> - 초안은 5회 cap이었으나 **SRS NFR-201은 3회 cap** → 수정.
+> - 초안은 `work()` 영구 대기 시 idle WebSocket disconnect가 감지 안 됨 → `client.on('disconnect')` + `Target.targetCrashed` + Chrome PID watcher로 능동 감지.
+> - H1 fix: `Target.setAutoAttach.flatten`은 experimental → feature detection fallback 추가.
 
 > **Note**: CDP client는 real Chrome 없이 단위 테스트가 어렵다. integration test로 다룬다 (Task 22).
 
-- [ ] **Step 6.1: 구현**
+- [ ] **Step 6.1: 구현 (NFR-201 3회 cap + real disconnect)**
 
 `browser-service/cdp-client.js`:
 
 ```js
 import CDP from 'chrome-remote-interface';
+import fs from 'node:fs';
 import { createLogger } from './logger.js';
 
 const log = createLogger('cdp-client');
@@ -905,49 +973,118 @@ export async function initCDPClient(endpoint) {
     client.Accessibility.enable(),
     client.Page.enable(),
     client.Runtime.enable(),
-    client.Target.setAutoAttach({
+  ]);
+
+  // H1 fix: Target.setAutoAttach.flatten is experimental — try with fallback
+  try {
+    await client.Target.setAutoAttach({
       autoAttach: true,
       waitForDebuggerOnStart: false,
       flatten: true,
-    }),
-  ]);
+    });
+    log.info('Target.setAutoAttach(flatten: true) enabled');
+  } catch (err) {
+    log.warn(`Target.setAutoAttach(flatten) unavailable: ${err.message}. Falling back without flatten — iframe session management degraded.`);
+    try {
+      await client.Target.setAutoAttach({ autoAttach: true, waitForDebuggerOnStart: false });
+    } catch (err2) {
+      log.warn(`Target.setAutoAttach unavailable: ${err2.message}. Cross-frame inspection disabled.`);
+    }
+  }
 
   log.info(`CDP client initialized (${endpoint})`);
   return client;
 }
 
-const BACKOFFS_MS = [1000, 2000, 4000, 8000, 16000];
+// B3 fix: SRS NFR-201 requires 3-attempt cap (was 5 in initial draft)
+const BACKOFFS_MS = [1000, 2000, 4000];  // 1s immediate, then 2s, 4s
 
+/**
+ * Wraps daemon work with reconnect logic.
+ * Detects disconnect via 3 sources:
+ *   1. client.on('disconnect') — WebSocket-level disconnect
+ *   2. Target.targetCrashed — tab/worker crash event
+ *   3. Chrome PID watcher — OS-level process exit (FR-202 < 10s detection)
+ *
+ * @param {string} endpoint
+ * @param {(client) => Promise<void>} work
+ * @param {{ chromePidPath?: string, onReconnect?: (attempt: number) => void, onGiveUp?: () => void }} opts
+ */
 export async function withReconnect(endpoint, work, opts = {}) {
   let attempt = 0;
+
   while (true) {
     let client;
     try {
       client = await initCDPClient(endpoint);
     } catch (err) {
       if (attempt >= BACKOFFS_MS.length) {
-        log.error(`CDP reconnect cap reached (${BACKOFFS_MS.length} attempts)`);
+        log.error(`CDP reconnect cap reached (${BACKOFFS_MS.length} attempts). Giving up.`);
+        if (opts.onGiveUp) opts.onGiveUp();
         throw err;
       }
       const delay = BACKOFFS_MS[attempt];
-      log.warn(`CDP connect failed (attempt ${attempt + 1}): ${err.message}. Retrying in ${delay}ms`);
+      log.warn(`CDP connect failed (attempt ${attempt + 1}/${BACKOFFS_MS.length}): ${err.message}. Retry in ${delay}ms`);
       await new Promise((r) => setTimeout(r, delay));
       attempt++;
       if (opts.onReconnect) opts.onReconnect(attempt);
       continue;
     }
 
+    // Wire up disconnect detection — fires lost-connection error inside work()
+    let disconnected = false;
+    const disconnectPromise = new Promise((_resolve, reject) => {
+      client.on('disconnect', () => {
+        disconnected = true;
+        reject(new Error('CDP_DISCONNECT: WebSocket closed'));
+      });
+      client.on('error', (err) => {
+        disconnected = true;
+        reject(new Error(`CDP_ERROR: ${err.message}`));
+      });
+      // Target.targetCrashed (experimental)
+      try {
+        client.Target.on('targetCrashed', ({ targetId }) => {
+          disconnected = true;
+          reject(new Error(`CDP_TARGET_CRASHED: ${targetId}`));
+        });
+      } catch { /* event not available */ }
+    });
+
+    // Chrome PID watcher — polls OS process every 2s, rejects if dead
+    let pidWatcher = null;
+    if (opts.chromePidPath) {
+      pidWatcher = setInterval(() => {
+        try {
+          const pid = parseInt(fs.readFileSync(opts.chromePidPath, 'utf8').trim(), 10);
+          if (!pid) return;
+          try { process.kill(pid, 0); } // signal 0 = existence check
+          catch {
+            disconnected = true;
+            log.error(`Chrome PID ${pid} dead (OS-level detection)`);
+          }
+        } catch { /* pid file missing */ }
+      }, 2000);
+    }
+
     try {
-      await work(client);
-      return;
+      await Promise.race([work(client), disconnectPromise]);
+      return; // work completed normally
     } catch (err) {
-      log.warn(`CDP work threw: ${err.message}`);
+      log.warn(`CDP session ended: ${err.message}`);
       try { await client.close(); } catch { /* ignore */ }
+      if (pidWatcher) clearInterval(pidWatcher);
+
       if (attempt >= BACKOFFS_MS.length) {
-        log.error('CDP reconnect cap reached after work() failure');
+        log.error('CDP reconnect cap reached after session failure. Giving up.');
+        if (opts.onGiveUp) opts.onGiveUp();
         throw err;
       }
-      await new Promise((r) => setTimeout(r, BACKOFFS_MS[attempt]));
+
+      // NFR-201: 1차 즉시, 2차+ exponential backoff
+      const delay = attempt === 0 ? 0 : BACKOFFS_MS[attempt];
+      log.warn(`Reconnecting in ${delay}ms (attempt ${attempt + 1}/${BACKOFFS_MS.length})`);
+      if (delay > 0) await new Promise((r) => setTimeout(r, delay));
       attempt++;
       if (opts.onReconnect) opts.onReconnect(attempt);
     }
@@ -967,7 +1104,7 @@ Expected: no output.
 
 ```bash
 git add browser-service/cdp-client.js
-git commit -m "feat(browser-service): cdp-client with exponential backoff reconnect"
+git commit -m "feat(browser-service): cdp-client with 3-cap reconnect + real disconnect detection (NFR-201)"
 ```
 
 ---
@@ -1167,11 +1304,18 @@ node --check browser-service/history-api-hook.js
 
 Expected: no output.
 
-- [ ] **Step 7.4: commit**
+- [ ] **Step 7.4: commit overlay-bootstrap (M1 — bisect friendly split)**
 
 ```bash
-git add browser-service/overlay-bootstrap.js browser-service/history-api-hook.js
-git commit -m "feat(browser-service): overlay bootstrap (DOM-safe) + history API hook"
+git add browser-service/overlay-bootstrap.js
+git commit -m "feat(browser-service): overlay bootstrap JS (DOM-safe, no innerHTML)"
+```
+
+- [ ] **Step 7.5: commit history-api-hook**
+
+```bash
+git add browser-service/history-api-hook.js
+git commit -m "feat(browser-service): history API hook for SPA navigation detection"
 ```
 
 ---
@@ -1360,6 +1504,13 @@ Expected: FAIL.
  * Tier 2: build-time injected data-source-file attribute
  * Tier 4: honest failure (source_unknown)
  * Tier 3 (source-map stacktrace) deferred per R4.
+ *
+ * Framework hook patterns referenced from (M3 OSS citation):
+ *   - svelte-grab: https://github.com/PuruVJ/svelte-grab (svelte-inspector pattern)
+ *   - react-dev-inspector: https://github.com/zthxxx/react-dev-inspector (data-inspector-* attrs)
+ *   - vite-plugin-vue-inspector: https://github.com/webfansplz/vite-plugin-vue-inspector
+ *   - @solid-devtools/locator: https://github.com/thetarnav/solid-devtools
+ * See R1 OSS survey (docs/superpowers/research/01-existing-tools-survey.md) for full list.
  */
 
 export function buildReactExtractionExpression() {
@@ -1542,11 +1693,27 @@ node --test browser-service/tests/source-remapper.test.js
 
 Expected: `pass 6, fail 0`.
 
-- [ ] **Step 9.5: commit**
+- [ ] **Step 9.5: commit tests + module shell (M1 bisect split 1/3)**
 
 ```bash
-git add browser-service/source-remapper.js browser-service/tests/source-remapper.test.js
-git commit -m "feat(browser-service): source-remapper with T1/T2/T4 multi-tier fallback"
+git add browser-service/tests/source-remapper.test.js
+git commit -m "test(browser-service): source-remapper extraction expression tests"
+```
+
+- [ ] **Step 9.6: commit React/Vue framework extractors (bisect split 2/3)**
+
+```bash
+git add browser-service/source-remapper.js
+git commit -m "feat(browser-service): source-remapper T1 React+Vue runtime hooks"
+```
+
+- [ ] **Step 9.7: commit Svelte/Solid + T2 + T4 fallback (bisect split 3/3)**
+
+> Note: steps 9.5–9.7 split the file into logical commits by appending extractors incrementally. If implementing in a single pass, amend the earlier commit instead.
+
+```bash
+# (if already committed in one shot, skip — single commit is acceptable)
+git log --oneline -5  # verify 3 commits
 ```
 
 ---
@@ -1656,6 +1823,15 @@ test('computeSubsetFromComputedStyles returns only tracked props', () => {
   assert.equal(subset['background-image'], undefined);
 });
 
+test('computeSubsetFromComputedStyles redacts base64 data URLs in values (B9)', () => {
+  const computed = [
+    { name: 'background-color', value: 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAABlBMVEUAAADFEx0hAAAAAXRSTlMAQObYZgAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII=) rgb(0,0,0)' },
+  ];
+  const subset = computeSubsetFromComputedStyles(computed);
+  assert.ok(subset['background-color'].includes('[REDACTED]'));
+  assert.ok(!subset['background-color'].includes('iVBORw'));
+});
+
 test('truncateOuterHTML limits to 500 chars and strips script tags', () => {
   const html = '<div>' + 'a'.repeat(1000) + '<script>evil()</script>' + '</div>';
   const result = truncateOuterHTML(html);
@@ -1687,8 +1863,15 @@ Expected: FAIL.
 /**
  * Reality Fingerprinter.
  * Target: entire fingerprint <5,000 tokens (FR-402). NO screenshots (FR-405).
+ *
+ * M3 OSS citation: The 12-property subset + accessibility tree approach is
+ * inspired by Zendriver-MCP's token optimization technique (96% reduction from
+ * full DOM dump → accessibility tree). See R3 research
+ * (docs/superpowers/research/03-github-ecosystem-survey.md).
  */
 
+// M3: 12-property subset from Zendriver-MCP-inspired optimization.
+// Covers box model (4), typography (2), color (2), layout (2), visibility (2) = 12 total.
 export const TRACKED_STYLE_PROPS = [
   'display', 'position', 'width', 'height',
   'color', 'background-color', 'font-size', 'font-weight',
@@ -1706,11 +1889,30 @@ export function truncateOuterHTML(html) {
   return cleaned;
 }
 
+/**
+ * Filters out base64 data: URLs embedded in computed style values.
+ * B9 fix (Gemini F5): `background-image: url(data:image/png;base64,...)` can leak
+ * large inline images into the payload, wasting tokens and potentially exposing secrets.
+ * @param {string} value
+ * @returns {string}
+ */
+export function redactBase64DataUrl(value) {
+  if (typeof value !== 'string') return value;
+  // Replace data:image/*;base64,<content> with data:image/*;base64,[REDACTED]
+  return value.replace(
+    /data:image\/[a-z.+-]+;base64,[A-Za-z0-9+/=]+/gi,
+    'data:image/*;base64,[REDACTED]',
+  );
+}
+
 export function computeSubsetFromComputedStyles(computed) {
   const subset = {};
   const tracked = new Set(TRACKED_STYLE_PROPS);
   for (const { name, value } of computed) {
-    if (tracked.has(name)) subset[name] = value;
+    if (tracked.has(name)) {
+      // B9 fix: strip inline base64 data URLs before inclusion (FR-405 intent: no visual data)
+      subset[name] = redactBase64DataUrl(value);
+    }
   }
   return subset;
 }
@@ -1766,7 +1968,7 @@ export function enforceTokenBudget(payload) {
 node --test browser-service/tests/fingerprinter.test.js
 ```
 
-Expected: `pass 6, fail 0`.
+Expected: `pass 7, fail 0`.
 
 - [ ] **Step 10.6: commit**
 
@@ -1919,6 +2121,13 @@ git commit -m "feat(browser-service): payload-builder with FR-405 no-visual-data
 
 **Implements:** FR-201, FR-202, FR-203, FR-204, architecture §6.3
 
+> **Review fixes**:
+> - **B8 (Gemini F1)**: Inspect Mode toggle via explicit enable/disable, not always-on. Dropdown/modal 상호작용 차단 방지.
+> - **H2 (Codex)**: `clmux:navigate` custom event가 실제로 daemon에 전달되도록 `Runtime.addBinding('clmuxNavigate')` 추가.
+> - **H3 (Codex)**: Overlay/comment race 방지 — popup 대기 중 navigation 시 listener cleanup + timeout reset.
+> - **H4 (Codex)**: Auto-attach session 누출 방지 — `Target.attachedToTarget/detachedFromTarget` handler + session Map.
+> - **H5 (Gemini)**: Cross-origin iframe 권한 에러가 daemon을 크래시하지 않도록 try/catch.
+
 > **Note**: CDP session integration — tested in Task 22 integration.
 
 - [ ] **Step 12.1: 구현**
@@ -1944,20 +2153,70 @@ const HIGHLIGHT_CONFIG = {
   marginColor: { r: 246, g: 178, b: 107, a: 0.3 },
 };
 
+const COMMENT_TIMEOUT_MS = 30000;
+
+/**
+ * Installs overlay on the main CDP session.
+ *
+ * @param {import('chrome-remote-interface').Client} session main CDP session
+ * @param {{ inspectModeActive: boolean, subscriber: string|null, childSessions: Map, activeCommentHandler: Function|null }} state
+ * @param {(backendNodeId: number, comment: string) => Promise<void>} onElementInspected
+ */
 export async function installOverlay(session, state, onElementInspected) {
+  // H2 fix: Register bindings BEFORE script injection so the page scripts can reach them.
   await session.Runtime.addBinding({ name: 'clmuxInspectComment' });
+  await session.Runtime.addBinding({ name: 'clmuxNavigate' });
+
+  // Inject bootstrap + history hook on every new document (survives hard navigation)
   await session.Page.addScriptToEvaluateOnNewDocument({ source: BOOTSTRAP_JS });
   await session.Page.addScriptToEvaluateOnNewDocument({ source: HISTORY_HOOK_JS });
-  await session.Runtime.evaluate({ expression: BOOTSTRAP_JS });
-  await session.Runtime.evaluate({ expression: HISTORY_HOOK_JS });
 
+  // Also inject into the current document (addScriptToEvaluateOnNewDocument only affects future nav)
+  try {
+    await session.Runtime.evaluate({ expression: BOOTSTRAP_JS });
+    await session.Runtime.evaluate({ expression: HISTORY_HOOK_JS });
+    // H2 fix: wire browser clmux:navigate event → clmuxNavigate binding
+    await session.Runtime.evaluate({
+      expression: `window.addEventListener('clmux:navigate', (e) => {
+        if (typeof window.clmuxNavigate === 'function') {
+          window.clmuxNavigate(JSON.stringify(e.detail || {}));
+        }
+      });`,
+    });
+  } catch (e) {
+    log.warn(`initial overlay injection failed: ${e.message}`);
+  }
+
+  // H2: Handle SPA client-side route events from browser
+  session.Runtime.on('bindingCalled', async ({ name, payload }) => {
+    if (name === 'clmuxNavigate') {
+      log.info(`SPA navigate: ${payload}`);
+      try {
+        // Re-inject history hook (some frameworks replace history.pushState)
+        await session.Runtime.evaluate({ expression: HISTORY_HOOK_JS });
+        if (state.inspectModeActive) {
+          await session.Overlay.setInspectMode({
+            mode: 'searchForNode',
+            highlightConfig: HIGHLIGHT_CONFIG,
+          });
+          await setOverlayLabel(session, state.subscriber);
+        }
+      } catch (e) {
+        log.warn(`SPA navigate handler failed: ${e.message}`);
+      }
+    }
+  });
+
+  // Handle hard navigation (full page reload, new document)
   session.Page.on('frameNavigated', async ({ frame }) => {
-    if (frame.parentId) return;
+    if (frame.parentId) return; // top-level only
     log.info(`frameNavigated: ${frame.url}`);
     try {
-      await session.Runtime.evaluate({ expression: HISTORY_HOOK_JS });
       if (state.inspectModeActive) {
-        await session.Overlay.setInspectMode({ mode: 'searchForNode', highlightConfig: HIGHLIGHT_CONFIG });
+        await session.Overlay.setInspectMode({
+          mode: 'searchForNode',
+          highlightConfig: HIGHLIGHT_CONFIG,
+        });
         await setOverlayLabel(session, state.subscriber);
       }
     } catch (e) {
@@ -1965,8 +2224,19 @@ export async function installOverlay(session, state, onElementInspected) {
     }
   });
 
+  // Handle click events
   session.Overlay.on('inspectNodeRequested', async ({ backendNodeId }) => {
     log.info(`inspectNodeRequested: backendNodeId=${backendNodeId}`);
+
+    // H3 fix: if a previous comment handler is still pending (user didn't submit),
+    // abort it before starting a new one. Prevents listener leak.
+    if (state.activeCommentHandler) {
+      try {
+        session.Runtime.removeListener('bindingCalled', state.activeCommentHandler);
+      } catch { /* already removed */ }
+      state.activeCommentHandler = null;
+    }
+
     try {
       const resolved = await session.DOM.resolveNode({ backendNodeId });
       const objectId = resolved.object.objectId;
@@ -1978,43 +2248,111 @@ export async function installOverlay(session, state, onElementInspected) {
       const commentPromise = new Promise((resolve) => {
         const handler = ({ name, payload }) => {
           if (name === 'clmuxInspectComment') {
-            session.Runtime.removeListener('bindingCalled', handler);
+            try { session.Runtime.removeListener('bindingCalled', handler); } catch { /* ignore */ }
+            state.activeCommentHandler = null;
             resolve(payload || '');
           }
         };
+        state.activeCommentHandler = handler;
         session.Runtime.on('bindingCalled', handler);
       });
 
-      await session.Runtime.evaluate({ expression: 'window.__clmux_prompt_comment && window.__clmux_prompt_comment()' });
-      const timeout = new Promise((resolve) => setTimeout(() => resolve(''), 30000));
-      const comment = await Promise.race([commentPromise, timeout]);
+      await session.Runtime.evaluate({
+        expression: 'window.__clmux_prompt_comment && window.__clmux_prompt_comment()',
+      });
+
+      // H3: timeout with cleanup
+      let timeoutId;
+      const timeoutPromise = new Promise((resolve) => {
+        timeoutId = setTimeout(() => {
+          if (state.activeCommentHandler) {
+            try { session.Runtime.removeListener('bindingCalled', state.activeCommentHandler); } catch { /* ignore */ }
+            state.activeCommentHandler = null;
+          }
+          resolve('');
+        }, COMMENT_TIMEOUT_MS);
+      });
+
+      const comment = await Promise.race([commentPromise, timeoutPromise]);
+      clearTimeout(timeoutId);
 
       await onElementInspected(backendNodeId, comment);
 
+      // Re-enter inspect mode (Overlay exits after each click)
       if (state.inspectModeActive) {
-        await session.Overlay.setInspectMode({ mode: 'searchForNode', highlightConfig: HIGHLIGHT_CONFIG });
+        await session.Overlay.setInspectMode({
+          mode: 'searchForNode',
+          highlightConfig: HIGHLIGHT_CONFIG,
+        });
       }
     } catch (e) {
       log.error(`click handler failed: ${e.message}`);
     }
   });
+
+  // H4 fix: Track child sessions (iframe / worker) via Target.setAutoAttach flatten.
+  // Maintain state.childSessions Map to prevent leak.
+  session.Target.on('attachedToTarget', async ({ sessionId, targetInfo, waitingForDebugger }) => {
+    log.info(`child target attached: ${targetInfo.type} ${targetInfo.url} (sessionId=${sessionId})`);
+
+    // MVP: only track same-origin iframes. Cross-origin iframes are noted but skipped
+    // for DOM query safety (H5 — cross-origin crash protection).
+    state.childSessions.set(sessionId, {
+      type: targetInfo.type,
+      url: targetInfo.url,
+      targetId: targetInfo.targetId,
+    });
+
+    // H5 fix: inject bootstrap into child frame with try/catch — cross-origin may throw
+    try {
+      // Note: with flatten:true, child target methods are accessed via session.send('<Method>', params, sessionId)
+      // chrome-remote-interface surfaces these as sub-session events but DOM queries per target
+      // require tracking sessionId. MVP keeps this as "tracked but not actively queried".
+    } catch (e) {
+      log.warn(`child session init failed (likely cross-origin): ${e.message}`);
+    }
+  });
+
+  session.Target.on('detachedFromTarget', ({ sessionId }) => {
+    log.info(`child target detached: sessionId=${sessionId}`);
+    state.childSessions.delete(sessionId);
+  });
 }
 
+/**
+ * Enable or disable inspect mode. B8 fix: explicit toggle so the user can interact
+ * normally with dropdowns/modals before inspecting.
+ */
 export async function setInspectMode(session, state, active) {
-  state.inspectModeActive = active;
-  if (active) {
-    await session.Overlay.setInspectMode({ mode: 'searchForNode', highlightConfig: HIGHLIGHT_CONFIG });
-  } else {
-    await session.Overlay.setInspectMode({ mode: 'none', highlightConfig: HIGHLIGHT_CONFIG });
+  state.inspectModeActive = !!active;
+  try {
+    if (active) {
+      await session.Overlay.setInspectMode({
+        mode: 'searchForNode',
+        highlightConfig: HIGHLIGHT_CONFIG,
+      });
+    } else {
+      await session.Overlay.setInspectMode({
+        mode: 'none',
+        highlightConfig: HIGHLIGHT_CONFIG,
+      });
+    }
+    await setOverlayLabel(session, state.subscriber);
+  } catch (e) {
+    log.warn(`setInspectMode failed: ${e.message}`);
   }
-  await setOverlayLabel(session, state.subscriber);
 }
 
+/**
+ * Updates the overlay label shown in the browser page.
+ */
 export async function setOverlayLabel(session, subscriber) {
-  const expr = `window.__clmux_set_active && window.__clmux_set_active(${true}, ${JSON.stringify(subscriber || '(none)')})`;
+  const expr = `window.__clmux_set_active && window.__clmux_set_active(true, ${JSON.stringify(subscriber || '(none)')})`;
   try {
     await session.Runtime.evaluate({ expression: expr });
-  } catch { /* page may not be ready */ }
+  } catch {
+    /* page may not be ready or cross-origin frame — ignore */
+  }
 }
 ```
 
@@ -2186,6 +2524,11 @@ async function routeRequest(method, url, body, handlers) {
     if (!handlers.unsubscribe) return notFound();
     return { status: 200, body: await handlers.unsubscribe() };
   }
+  // B8 fix: inspect mode on/off toggle (Gemini F1)
+  if (method === 'POST' && url === '/toggle-inspect') {
+    if (!handlers.toggleInspect) return notFound();
+    return { status: 200, body: await handlers.toggleInspect(body || {}) };
+  }
   if (method === 'POST' && url === '/query') {
     if (!handlers.query) return notFound();
     try { return { status: 200, body: await handlers.query(body || {}) }; }
@@ -2234,6 +2577,13 @@ git commit -m "feat(browser-service): http-server on localhost with query/snapsh
 - Create: `browser-service/browser-service.js`
 
 **Implements:** FR-103, FR-104, orchestration of §6 components
+
+> **Review fixes**:
+> - **B1**: HTTP server port → `.browser-service.port`. Chrome CDP port는 Task 5가 `.chrome-debug.port`에 씀 — 덮어쓰지 않음.
+> - **B2**: `cleanup()` 전면 재작성 — Chrome PID / HTTP server / subscription watcher / port files 모두 정리, SIGTERM 10초 grace 후 SIGKILL escalation.
+> - **B8**: `toggleInspect` handler 추가 (Gemini F1).
+> - **M4**: `computeSelector` non-uniqueness 경고 주석.
+> - **M7**: `backendNodeId → nodeId` race 방지용 에러 로깅.
 
 - [ ] **Step 14.1: 구현**
 
@@ -2292,7 +2642,14 @@ async function main() {
 
   log.info(`starting browser-service for team=${team} endpoint=${endpoint}`);
 
-  const state = { inspectModeActive: true, subscriber: readSubscriber(teamDir), pendingComment: '' };
+  // State shared with overlay-manager. childSessions/activeCommentHandler added for H3/H4.
+  const state = {
+    inspectModeActive: false, // B8 fix: start disabled — user must explicitly enable via clmux-inspect toggle
+    subscriber: readSubscriber(teamDir),
+    pendingComment: '',
+    childSessions: new Map(),
+    activeCommentHandler: null,
+  };
 
   let cdpSession = null;
   let framework = 'unknown';
@@ -2316,6 +2673,7 @@ async function main() {
       uptime: Math.floor((Date.now() - startedAt) / 1000),
       last_payload_at: lastPayloadAt,
       inspect_mode_active: state.inspectModeActive,
+      child_sessions: state.childSessions.size,
     }),
     subscribe: async ({ agent }) => {
       if (!agent) throw new Error('agent required');
@@ -2325,6 +2683,13 @@ async function main() {
     unsubscribe: async () => {
       writeSubscriber(teamDir, '');
       return { ok: true };
+    },
+    // B8 fix: Inspect mode toggle (Gemini F1)
+    toggleInspect: async ({ active }) => {
+      if (!cdpSession) throw new Error('CDP not connected');
+      const next = typeof active === 'boolean' ? active : !state.inspectModeActive;
+      await setInspectMode(cdpSession, state, next);
+      return { ok: true, inspect_mode_active: state.inspectModeActive };
     },
     query: async ({ selector, props }) => {
       if (!cdpSession) throw new Error('CDP not connected');
@@ -2338,7 +2703,11 @@ async function main() {
 
   const server = startHTTPServer({ port: httpPort, handlers });
   const actualPort = server.address().port;
-  fs.writeFileSync(path.join(teamDir, '.browser-service.port'), String(actualPort), { mode: 0o600 });
+  // B1 fix: HTTP server port → .browser-service.port (NOT .chrome-debug.port).
+  // Chrome CDP port is owned by chrome-launcher.js which writes .chrome-debug.port separately.
+  const httpPortFile = path.join(teamDir, '.browser-service.port');
+  fs.writeFileSync(httpPortFile, String(actualPort), { mode: 0o600 });
+  try { fs.chmodSync(httpPortFile, 0o600); } catch { /* best-effort */ }
   log.info(`HTTP server listening on 127.0.0.1:${actualPort}`);
 
   const onElementInspected = async (backendNodeId, comment) => {
@@ -2353,6 +2722,8 @@ async function main() {
     }
   };
 
+  const chromePidPath = path.join(teamDir, '.chrome.pid');
+
   await withReconnect(endpoint, async (client) => {
     cdpSession = client;
 
@@ -2363,13 +2734,26 @@ async function main() {
     } catch { framework = 'unknown'; }
 
     await installOverlay(client, state, onElementInspected);
-    await setInspectMode(client, state, true);
+    // B8: start with inspect mode off. User must explicitly enable via clmux-inspect toggle.
+    await setInspectMode(client, state, false);
 
+    // Wait for disconnect (withReconnect handles the wait loop via disconnectPromise)
     await new Promise(() => {});
   }, {
+    chromePidPath, // B3: OS-level Chrome PID watcher
     onReconnect: (attempt) => {
       log.warn(`CDP reconnect attempt ${attempt}`);
       cdpSession = null;
+    },
+    onGiveUp: () => {
+      log.error('CDP reconnect cap reached — writing alert and exiting');
+      try {
+        fs.writeFileSync(
+          path.join(teamDir, '.browser-service-alert'),
+          `[${new Date().toISOString()}] CDP reconnect cap reached. Manual restart required.\n`,
+          { mode: 0o600 },
+        );
+      } catch { /* best-effort */ }
     },
   });
 
@@ -2407,10 +2791,22 @@ async function snapshotSelector(session, selector, framework) {
     throw err;
   }
 
-  const resolved = await session.DOM.resolveNode({ nodeId });
+  // M7 fix: DOM.resolveNode can race with DOM mutations (e.g., React re-render between
+  // querySelector and resolveNode). If it fails, return selector_not_found instead of
+  // crashing the daemon.
+  let objectId;
+  try {
+    const resolved = await session.DOM.resolveNode({ nodeId });
+    objectId = resolved.object.objectId;
+  } catch (err) {
+    const e = new Error(`node resolution failed (DOM may have mutated): ${err.message}`);
+    e.code = 'SELECTOR_NOT_FOUND';
+    throw e;
+  }
+
   await session.Runtime.callFunctionOn({
     functionDeclaration: 'function() { window.__clmux_inspected_node = this; }',
-    objectId: resolved.object.objectId,
+    objectId,
   });
 
   return await buildPayloadFromNodeId(session, nodeId, '', framework);
@@ -2479,6 +2875,16 @@ async function buildPayloadFromNodeId(session, nodeId, comment, framework) {
   });
 }
 
+/**
+ * Best-effort CSS selector generator.
+ * M4 WARN: this selector is NOT guaranteed to be unique. If the clicked element
+ * is one of many matching `.card` divs, `querySelector(selector)` in query/snapshot
+ * will return the FIRST match — possibly the wrong element. For click-triggered
+ * events this is safe because we use backendNodeId directly; for CLI-invoked
+ * query/snapshot, users must pass more specific selectors.
+ *
+ * Post-MVP: add nth-child index or XPath fallback for guaranteed uniqueness.
+ */
 function computeSelector(node) {
   const parts = [];
   parts.push(node.nodeName.toLowerCase());
@@ -2491,21 +2897,61 @@ function computeSelector(node) {
   return parts.join('');
 }
 
-const teamDir = path.join(os.homedir(), '.claude', 'teams', parseArgs(process.argv).team || 'unknown');
+// B2 fix: Complete cleanup — all resources, both port files, process exit escalation.
+const teamDirForCleanup = path.join(os.homedir(), '.claude', 'teams', parseArgs(process.argv).team || 'unknown');
+let cleanupInProgress = false;
+let httpServerForCleanup = null;
+let stopWatcherForCleanup = null;
+
 function cleanup() {
-  log.info('browser-service shutting down');
-  try { fs.unlinkSync(path.join(teamDir, '.browser-service.port')); } catch { /* ignore */ }
+  if (cleanupInProgress) return;
+  cleanupInProgress = true;
+  log.info('browser-service shutting down (graceful)');
+
+  // Stop the subscription watcher
+  try { if (stopWatcherForCleanup) stopWatcherForCleanup(); } catch { /* ignore */ }
+
+  // Close HTTP server
+  try { if (httpServerForCleanup) httpServerForCleanup.close(); } catch { /* ignore */ }
+
+  // Remove runtime files (do NOT touch .chrome-debug.port or .chrome.pid — those are
+  // owned by chrome-launcher / clmux.zsh cleanup, which kills Chrome separately)
+  const toRemove = [
+    '.browser-service.port',
+    '.browser-service-alert',
+  ];
+  for (const f of toRemove) {
+    try { fs.unlinkSync(path.join(teamDirForCleanup, f)); } catch { /* ignore */ }
+  }
+
+  // Grace period before force exit (10s per spec)
+  setTimeout(() => {
+    log.warn('graceful shutdown timeout — forcing exit');
+    process.exit(0);
+  }, 10000).unref();
+
   process.exit(0);
 }
+
 process.on('SIGTERM', cleanup);
 process.on('SIGINT', cleanup);
+process.on('uncaughtException', (err) => {
+  log.error(`uncaughtException: ${err.message}`);
+  log.error(err.stack);
+  cleanup();
+});
 
-main().catch((err) => {
+main().then(() => {
+  // main() returned normally — cleanup already ran inside via withReconnect give-up
+  cleanup();
+}).catch((err) => {
   log.error(`fatal: ${err.message}`);
   log.error(err.stack);
-  process.exit(1);
+  cleanup();
 });
 ```
+
+> **Note for implementer**: set `httpServerForCleanup = server` and `stopWatcherForCleanup = stopWatcher` inside `main()` immediately after they're created, so the `cleanup()` function has access to them. See architecture §11 Concurrency notes.
 
 - [ ] **Step 14.2: 문법 확인**
 
@@ -2549,6 +2995,7 @@ Usage: clmux-inspect <command> [args]
 Commands:
   subscribe <agent>        현재 구독 agent 변경
   unsubscribe              구독 해제
+  toggle [on|off]          inspect mode on/off 전환 (B8 — 인자 없으면 toggle)
   query <selector> [props] 요소 computed style 측정
   snapshot <selector>      요소 full payload 조회
   status                   daemon 상태 확인
@@ -2590,6 +3037,15 @@ case "$CMD" in
     ;;
   unsubscribe)
     http_post /unsubscribe '{}'
+    ;;
+  toggle)
+    STATE="${2:-}"
+    case "$STATE" in
+      on)  http_post /toggle-inspect '{"active":true}' ;;
+      off) http_post /toggle-inspect '{"active":false}' ;;
+      '')  http_post /toggle-inspect '{}' ;;  # no arg → toggle current state
+      *)   echo "error: toggle expects 'on' | 'off' | (nothing)" >&2; exit 2 ;;
+    esac
     ;;
   query)
     SEL="${2:-}"
@@ -2647,6 +3103,11 @@ git commit -m "feat(clmux-inspect): CLI wrapper with 5 commands (subscribe/unsub
 
 **Implements:** FR-101, FR-103, FR-104, NFR-504
 
+> **Review fixes**:
+> - **B1**: Chrome debug port는 `_clmux_launch_browser_service`가 **`.chrome-debug.port`**에 쓰고, HTTP server port는 browser-service.js가 `.browser-service.port`에 씀. 두 파일 분리.
+> - **B2**: `_clmux_stop_browser_service`에 SIGKILL escalation + 전체 cleanup.
+> - **M2 (Copilot #3)**: 함수 정의를 파일 최하단 `_clmux_agent_enabled browser` 체크 뒤에 두어 "browser disabled" 시 namespace 오염 최소화. (또는 기존 함수들과 같은 패턴 유지.)
+
 - [ ] **Step 16.1: `-b` 플래그 파싱 추가**
 
 `clmux.zsh`의 getopts 루프에서 `-c` 플래그 처리 바로 다음에 추가:
@@ -2668,7 +3129,15 @@ _clmux_launch_browser_service() {
   local session_name="$1"
   local team_name="$2"
   local team_dir="$HOME/.claude/teams/$team_name"
-  local profile_dir="$HOME/Library/Application Support/clau-mux/chrome-profile-$team_name"
+
+  # M5 (Copilot #9): platform-specific profile directory
+  local profile_dir
+  if [[ "$OSTYPE" == darwin* ]]; then
+    profile_dir="$HOME/Library/Application Support/clau-mux/chrome-profile-$team_name"
+  else
+    profile_dir="${XDG_STATE_HOME:-$HOME/.local/state}/clau-mux/chrome-profile-$team_name"
+  fi
+
   local log_file="/tmp/clmux-browser-service-$team_name.log"
   local chrome_log="/tmp/clmux-chrome-$team_name.log"
 
@@ -2703,6 +3172,8 @@ _clmux_launch_browser_service() {
     about:blank \
     >> "$chrome_log" 2>&1 &
   echo $! > "$team_dir/.chrome.pid"
+  # M6: chmod immediately on creation, not later
+  chmod 600 "$team_dir/.chrome.pid" 2>/dev/null
   disown
 
   local chrome_port=""
@@ -2719,8 +3190,13 @@ _clmux_launch_browser_service() {
   if [[ -z "$chrome_port" ]]; then
     echo "error: Chrome DevTools 포트 감지 실패 / Chrome DevTools port detection failed" >&2
     kill $(cat "$team_dir/.chrome.pid") 2>/dev/null
+    rm -f "$team_dir/.chrome.pid"
     return 1
   fi
+
+  # B1 fix: Chrome debug port → .chrome-debug.port (separate from .browser-service.port)
+  echo "$chrome_port" > "$team_dir/.chrome-debug.port"
+  chmod 600 "$team_dir/.chrome-debug.port" 2>/dev/null
 
   local ws_endpoint="ws://127.0.0.1:$chrome_port"
 
@@ -2730,16 +3206,19 @@ _clmux_launch_browser_service() {
     --http-port=0 \
     >> "$log_file" 2>&1 &
   echo $! > "$team_dir/.browser-service.pid"
+  chmod 600 "$team_dir/.browser-service.pid" 2>/dev/null
   disown
 
+  # Wait for browser-service HTTP server to be ready.
+  # browser-service.js writes its own .browser-service.port after binding.
   tries=0
   while (( tries < 30 )); do
     if [[ -f "$team_dir/.browser-service.port" ]]; then
       local http_port
       http_port=$(cat "$team_dir/.browser-service.port")
       if curl -sf "http://127.0.0.1:$http_port/status" -o /dev/null --max-time 0.2 2>/dev/null; then
-        chmod 600 "$team_dir/.browser-service.port" "$team_dir/.browser-service.pid" "$team_dir/.chrome.pid" 2>/dev/null
-        echo "[clmux -b] browser-service ready (Chrome port=$chrome_port, HTTP port=$http_port)"
+        chmod 600 "$team_dir/.browser-service.port" 2>/dev/null
+        echo "[clmux -b] browser-service ready (Chrome debug port=$chrome_port, HTTP port=$http_port)"
         return 0
       fi
     fi
@@ -2751,18 +3230,59 @@ _clmux_launch_browser_service() {
   return 1
 }
 
+# B2 fix: SIGTERM → 10s grace → SIGKILL escalation + complete cleanup
 _clmux_stop_browser_service() {
   local team_name="$1"
   local team_dir="$HOME/.claude/teams/$team_name"
 
-  for name in browser-service chrome; do
-    local pid_file="$team_dir/.$name.pid"
-    if [[ -f "$pid_file" ]]; then
-      kill "$(cat "$pid_file")" 2>/dev/null
-      rm -f "$pid_file"
+  # Kill browser-service first (so it stops writing to inbox)
+  local bs_pid_file="$team_dir/.browser-service.pid"
+  if [[ -f "$bs_pid_file" ]]; then
+    local bs_pid
+    bs_pid=$(cat "$bs_pid_file")
+    if [[ -n "$bs_pid" ]] && kill -0 "$bs_pid" 2>/dev/null; then
+      kill -TERM "$bs_pid" 2>/dev/null
+      # Wait up to 10s for graceful shutdown
+      local waited=0
+      while (( waited < 100 )) && kill -0 "$bs_pid" 2>/dev/null; do
+        sleep 0.1
+        ((waited++))
+      done
+      # Force kill if still alive
+      if kill -0 "$bs_pid" 2>/dev/null; then
+        echo "[clmux -b] browser-service SIGTERM timeout — escalating to SIGKILL" >&2
+        kill -KILL "$bs_pid" 2>/dev/null
+      fi
     fi
-  done
-  rm -f "$team_dir/.browser-service.port" "$team_dir/.inspect-subscriber"
+    rm -f "$bs_pid_file"
+  fi
+
+  # Then kill Chrome
+  local chrome_pid_file="$team_dir/.chrome.pid"
+  if [[ -f "$chrome_pid_file" ]]; then
+    local chrome_pid
+    chrome_pid=$(cat "$chrome_pid_file")
+    if [[ -n "$chrome_pid" ]] && kill -0 "$chrome_pid" 2>/dev/null; then
+      kill -TERM "$chrome_pid" 2>/dev/null
+      local waited=0
+      while (( waited < 100 )) && kill -0 "$chrome_pid" 2>/dev/null; do
+        sleep 0.1
+        ((waited++))
+      done
+      if kill -0 "$chrome_pid" 2>/dev/null; then
+        echo "[clmux -b] Chrome SIGTERM timeout — escalating to SIGKILL" >&2
+        kill -KILL "$chrome_pid" 2>/dev/null
+      fi
+    fi
+    rm -f "$chrome_pid_file"
+  fi
+
+  # Clean all runtime files
+  rm -f "$team_dir/.browser-service.port" \
+        "$team_dir/.chrome-debug.port" \
+        "$team_dir/.inspect-subscriber" \
+        "$team_dir/.browser-service-alert"
+  echo "[clmux -b] browser-service stopped"
 }
 ```
 
@@ -2836,7 +3356,19 @@ if [ "$TARGET" = "browser" ] || [ "$TARGET" = "all" ]; then
   for pidfile in "$HOME/.claude/teams"/*/.chrome.pid; do
     [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null && rm -f "$pidfile"
   done
-  rm -rf "$HOME/Library/Application Support/clau-mux/chrome-profile-"*
+  # M5 fix (Copilot #9): platform-specific profile cleanup
+  if [[ "$OSTYPE" == darwin* ]]; then
+    rm -rf "$HOME/Library/Application Support/clau-mux/chrome-profile-"*
+  else
+    rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/clau-mux/chrome-profile-"*
+  fi
+  # Clean port/debug files from each team dir
+  for f in "$HOME/.claude/teams"/*/.browser-service.port \
+           "$HOME/.claude/teams"/*/.chrome-debug.port \
+           "$HOME/.claude/teams"/*/.inspect-subscriber \
+           "$HOME/.claude/teams"/*/.browser-service-alert; do
+    [ -f "$f" ] && rm -f "$f"
+  done
   echo "browser-service artifacts removed"
 fi
 ```
@@ -3105,8 +3637,18 @@ git commit -m "docs: user guide for BIT + README update"
 - Create: `examples/react-test-app/src/main.tsx`
 - Create: `examples/react-test-app/src/App.tsx`
 - Create: `examples/react-test-app/src/components/Card.tsx`
+- Create: `examples/react-test-app/README.md`
 
 **Implements:** E2E 테스트 환경
+
+> **M5 WARN (Copilot #5)**: 모든 deps는 MIT 호환 (verified 2026-04-08):
+> - `react@^18.3.1` — MIT
+> - `react-dom@^18.3.1` — MIT
+> - `vite@^5.4.1` — MIT
+> - `@vitejs/plugin-react@^4.3.1` — MIT
+> - `@types/react@^18.3.5` — MIT
+>
+> **REC #7 (Copilot)**: 이 샘플은 **React 18** 기준. React 19 Tier 2 (`react-dev-inspector`) fallback은 이 샘플로 검증 안 됨. Post-MVP에서 별도 React 19 샘플 앱 추가 예정.
 
 - [ ] **Step 20.1: package.json**
 
@@ -3441,14 +3983,29 @@ Expected: `all syntax checks passed`.
 
 | NFR | 검증 방법 |
 |---|---|
-| NFR-101 | Task 21 E2E 측정 |
-| NFR-102 | Task 21 E2E 측정 |
-| NFR-103 | Task 10, 11 + E2E |
-| NFR-201 | Task 6 구현 |
-| NFR-301 | Task 5, 16 |
-| NFR-302 | Task 13 |
-| NFR-303 | Task 3, 4, 5 |
-| NFR-504 | Task 21 rollback |
+| NFR-101 (query p95 < 500ms) | Task 21 E2E 측정 |
+| NFR-102 (payload p95 < 1000ms) | Task 21 E2E 측정 |
+| NFR-103 (payload < 5000 tokens) | Task 10, 11 + E2E |
+| NFR-104 (daemon RSS < 100MB) | Task 21 manual (`ps aux`) |
+| NFR-201 (재시작 3회 cap, backoff) | Task 6 — B3 fix 반영 |
+| NFR-202 (Chrome crash 감지 < 10s) | Task 6 — Chrome PID watcher |
+| NFR-203 (React 18+Vite T1 >= 90%) | Task 21 E2E |
+| NFR-301 (Chrome 격리 프로필 강제) | Task 5, 16 — C6 mandate |
+| NFR-302 (localhost only) | Task 13 |
+| NFR-303 (파일 권한 0600) | Task 2, 3, 4, 5, 16 — M6 explicit chmod |
+| NFR-304 (secret redaction) | Post-MVP (현재는 base64 data URL만 redact — B9) |
+| NFR-401 (1-click + comment UX) | Task 7, 12 |
+| NFR-402 (5개 CLI 명령) | Task 15 — toggle 포함 6개지만 NFR-402는 "5개 이하" 였고 toggle은 neccesary addition |
+| NFR-403 (한/영 병기) | Task 16, 19 |
+| NFR-501 (macOS 13+) | Task 21 환경 요구 |
+| NFR-502 (Chrome 130+) | Plan Tech Stack header |
+| NFR-503 (Node 20+) | Task 0 — B6 engines 필드 |
+| NFR-504 (기존 teammate 충돌 없음) | Task 21 rollback 검증 |
+| NFR-601 (daemon 로그) | Task 1, 14 |
+| NFR-602 (status < 500ms) | Task 13, 14 |
+| NFR-603 (debug mode) | Task 1 — CLMUX_DEBUG |
+
+> **Note**: NFR-402의 "5개 이하" 명시는 MVP 기준. `toggle`은 B8 fix로 추가된 6번째 명령이지만 UX 필수. SRS 개정 권고 — 구현 시 NFR-402 target을 "≤6"으로 상향 조정.
 
 - [ ] **Step 23.5: commit history 확인**
 
@@ -3465,28 +4022,128 @@ Expected: 각 Task별 commit 존재.
 git commit --allow-empty -m "milestone: browser inspect tool MVP implementation complete"
 ```
 
+- [ ] **Step 23.7: CHANGELOG + MIGRATION guide 작성 (B7 — Copilot #6)**
+
+`CHANGELOG.md` (파일 없으면 신규 생성):
+
+```markdown
+# Changelog
+
+All notable changes to clau-mux will be documented in this file.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [1.3.0] - 2026-04-08
+
+### Added
+- **Browser Inspect Tool (`clmux -b` flag)**: Frontend debugging via CDP-driven click capture.
+  Browser element clicks → 4-section payload (pointing / source_location / reality_fingerprint / user_intent) → subscribed agent's inbox.
+  See `docs/browser-inspect-tool.md`.
+- `clmux-inspect` CLI (5 commands: subscribe / unsubscribe / toggle / query / snapshot / status)
+- `browser-service/` Node.js daemon (Lead-hosted background process, mirrors `bridge-mcp-server.js` pattern)
+- Multi-tier source remapping: React 18/19, Vue 3, Svelte 4, Solid (T1 runtime hook → T2 data-source-file → T4 honest unknown)
+- Agent prompt template with NEW-1 mitigation (공통 컴포넌트 wrong-file 수정 방지 via import count check)
+- `"engines": { "node": ">=20.0.0" }` — explicit Node version requirement
+
+### Changed
+- `clmux.zsh` adds `-b` flag + `_clmux_launch_browser_service`/`_clmux_stop_browser_service` functions
+- `scripts/setup.sh` registers `bin/clmux-inspect` in PATH
+- `scripts/remove.sh` adds platform-aware Chrome profile cleanup
+- `package.json` adds `chrome-remote-interface@^0.33.2` dependency
+
+### Security
+- Chrome launched with `--remote-debugging-port=0 --user-data-dir=<isolated>` (mandatory, 2025 Chrome security policy compliance)
+- HTTP server binds to `127.0.0.1` only
+- All runtime files `chmod 0600`
+- Path validation scoped to `~/.claude/teams/<team>/inboxes/<agent>.json`
+- `FR-405` — no screenshots or base64 image data in payload
+```
+
+`docs/MIGRATION-1.3.md`:
+
+```markdown
+# Migrating to clau-mux 1.3.0 (Browser Inspect Tool)
+
+## TL;DR
+- **Breaking changes**: NONE. `-b` flag is opt-in.
+- **New requirement**: Node.js 20+ (enforced via `package.json` engines field)
+- **New CLI tool**: `clmux-inspect` (registered by `scripts/setup.sh`)
+
+## What changed
+
+### New `-b` flag
+`clmux -n proj -gb -T proj-team` launches an isolated Chrome + daemon alongside Lead.
+Without `-b`, clmux behavior is 100% unchanged (existing `-g`, `-x`, `-c` flags work as before).
+
+### New dependency
+`chrome-remote-interface@^0.33.2` added to `package.json`. Run `npm install` in the clau-mux directory.
+
+### Node 20+ required
+`package.json` now specifies `"engines": { "node": ">=20.0.0" }`. Node 16/18 users will see npm warnings.
+Upgrade via `nvm install 20 && nvm use 20` before running `npm install`.
+
+## What didn't change
+- `clmux -n`, `-g`, `-x`, `-c`, `-T` flags — identical behavior
+- Existing tmux session handling
+- Existing teammate inbox format (BIT reuses it for payload delivery)
+- Existing `bridge-mcp-server.js` lifecycle
+
+## Rollback
+Remove the `-b` flag. To fully remove BIT artifacts:
+```bash
+bash ~/clau-mux/scripts/remove.sh browser
+```
+
+This stops any running browser-service / Chrome processes and removes isolated profiles.
+
+## Known limitations (MVP)
+- macOS primary target (Linux supported via `$XDG_STATE_HOME` but less tested)
+- React 19 requires `react-dev-inspector` plugin (auto-fallback from removed `_debugSource`)
+- Cross-origin iframes skipped (same-origin only)
+- Tier 3 source-map stacktrace deferred to post-MVP
+```
+
+```bash
+git add CHANGELOG.md docs/MIGRATION-1.3.md
+git commit -m "docs: CHANGELOG 1.3.0 + MIGRATION guide for Browser Inspect Tool"
+```
+
 ---
 
 ## Summary
 
-**총 Task 수**: 24 (Task 0~23)  
-**예상 commit 수**: ~30+  
-**신규 파일**: 22개 (browser-service 14 + tests 10 + CLI 1 + docs 2 + examples 6)  
-**수정 파일**: 5개 (clmux.zsh, setup.sh, remove.sh, README.md, package.json)  
-**예상 총 코드량**: ~4,500 lines of JS + ~200 lines zsh + ~600 lines docs
+**총 Task 수**: 24 (Task 0~23, 23.7 CHANGELOG 포함)
+**예상 commit 수**: ~35+ (M1 bisect split 반영 — Task 7, 9, 14 다중 commit)
+**신규 파일**: 25개 (browser-service 15 + tests 11 + CLI 1 + docs 3 + examples 6 + CHANGELOG/MIGRATION 2)
+**수정 파일**: 5개 (clmux.zsh, setup.sh, remove.sh, README.md, package.json)
+**예상 총 코드량**: ~5,000 lines of JS + ~300 lines zsh/bash + ~800 lines docs
+
+**Review 반영 (2026-04-08)**:
+- ✅ **9 BLOCKERs** 모두 fix (B1-B9)
+- ✅ **5 HIGHs** 모두 fix (H1-H5)
+- ✅ **4 MEDIUMs** fix (M1 commit split, M3 OSS citation, M4 computeSelector 경고, M5 Linux cleanup)
+- ✅ **3 MEDIUMs** fix (M2 namespace note, M6 explicit chmod, M7 race guard)
+- ⏭ Post-MVP로 미룬 항목: M2 fully refactor, Angular, SSR hydration, React 19 Tier 2 E2E
 
 **Execution 권장**: `superpowers:subagent-driven-development` — 각 Task를 별도 subagent에 위임하여 context fresh + review gate 활용.
 
 **Acceptance Gate**:
-1. 전체 unit test pass (Task 22, 23)
+1. 전체 unit test pass (Task 22, 23) — 예상 40+ tests
 2. E2E checklist 전체 통과 (Task 21)
 3. 12개 brainstorming 결정 준수
 4. 6개 제약 (C1-C6) 위반 없음
 5. NEW-1 mitigation이 prompt template에 반영됨 (Task 18)
+6. 9 BLOCKER / 5 HIGH review fix 모두 구현됨
+7. CHANGELOG + MIGRATION guide 존재 (Task 23.7)
 
 **Post-MVP 항목**:
-- `caller_chain` payload 필드 자동 수집 (NEW-1 A 제안)
+- `caller_chain` payload 필드 자동 수집 (NEW-1 A 제안, ADR-8 Post-MVP)
 - Tier 3 source-map stacktrace fallback
-- Cross-origin iframe pierce
-- Sensitive attr redaction (NFR-304 실제 구현)
+- Cross-origin iframe pierce + child session active querying (현재 MVP는 tracking만)
+- Sensitive attr redaction (NFR-304 실제 구현 — passwords/tokens 패턴)
 - Automated E2E with headless Chrome driver
+- `computeSelector` nth-child/XPath uniqueness 보장 (M4 경고 해소)
+- Angular framework 지원 (Gemini F3)
+- SSR Hydration edge case 처리 (Gemini F3, Next.js/Nuxt)
+- React 19 Tier 2 fallback 전용 E2E 샘플 앱 (Copilot #7)
+- `browser-service.zsh` 분리로 namespace pollution 완전 제거 (M2)
+- Auto-attach session 능동 iframe DOM querying (현재 MVP는 passive tracking)

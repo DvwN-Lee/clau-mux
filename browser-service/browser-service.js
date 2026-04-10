@@ -17,7 +17,7 @@ import { initCDPClient, withReconnect } from './cdp-client.js';
 import { installOverlay, setInspectMode, setOverlayLabel } from './overlay-manager.js';
 import { buildDetectionExpression, parseDetectionResult } from './framework-detector.js';
 import { resolveSourceLocation } from './source-remapper.js';
-import { buildFingerprint, TRACKED_STYLE_PROPS, truncateOuterHTML } from './fingerprinter.js';
+import { buildFingerprint, TRACKED_STYLE_PROPS, truncateOuterHTML, enforceTokenBudget } from './fingerprinter.js';
 import { buildPayload } from './payload-builder.js';
 import { watchSubscriber, readSubscriber, writeSubscriber } from './subscription-watcher.js';
 import { writeToInbox } from './inbox-writer.js';
@@ -57,6 +57,7 @@ async function main() {
     pendingComment: '',
     childSessions: new Map(),
     activeCommentHandler: null,
+    clickGeneration: 0,
   };
 
   let cdpSession = null;
@@ -157,6 +158,7 @@ async function main() {
       cdpSession = null;
     },
     onGiveUp: () => {
+      isAlertShutdown = true;
       log.error('CDP reconnect cap reached — writing alert and exiting');
       try {
         fs.writeFileSync(
@@ -272,7 +274,7 @@ async function buildPayloadFromNodeId(session, nodeId, comment, framework) {
     }
   }
 
-  return buildPayload({
+  const payload = buildPayload({
     userIntent: comment,
     pointing: {
       selector: computeSelector(desc.node),
@@ -284,6 +286,13 @@ async function buildPayloadFromNodeId(session, nodeId, comment, framework) {
     fingerprint,
     url: pageUrl.result.value || '',
   });
+  const { ok, tokenCount } = enforceTokenBudget(payload);
+  if (!ok) {
+    log.warn(`Payload exceeds 5000 token budget (${tokenCount}). Truncating outerHTML.`);
+    payload.pointing.outerHTML = (payload.pointing.outerHTML || '').slice(0, 200) + '...[budget-truncated]';
+    payload.pointing.attrs = {};
+  }
+  return payload;
 }
 
 /**
@@ -310,6 +319,7 @@ function computeSelector(node) {
 
 // B2 fix: Complete cleanup — all resources, both port files, process exit escalation.
 const teamDirForCleanup = path.join(os.homedir(), '.claude', 'teams', parseArgs(process.argv).team || 'unknown');
+let isAlertShutdown = false;
 let cleanupInProgress = false;
 let httpServerForCleanup = null;
 let stopWatcherForCleanup = null;
@@ -329,7 +339,7 @@ function cleanup() {
   // owned by chrome-launcher / clmux.zsh cleanup, which kills Chrome separately)
   const toRemove = [
     '.browser-service.port',
-    '.browser-service-alert',
+    ...(isAlertShutdown ? [] : ['.browser-service-alert']),
   ];
   for (const f of toRemove) {
     try { fs.unlinkSync(path.join(teamDirForCleanup, f)); } catch { /* ignore */ }

@@ -7,8 +7,10 @@ import { writeToInbox, MAX_ENTRIES } from '../inbox-writer.js';
 
 let tmpHome;
 let teamDir;
+let originalHome;
 
 beforeEach(() => {
+  originalHome = process.env.HOME;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'clmux-test-'));
   process.env.HOME = tmpHome;
   teamDir = path.join(tmpHome, '.claude', 'teams', 'test-team');
@@ -16,6 +18,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  process.env.HOME = originalHome;
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 

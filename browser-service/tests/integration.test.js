@@ -12,3 +12,38 @@ test('daemon exits 2 when required args missing', async () => {
   assert.equal(result.code, 2);
   assert.match(result.stderr, /usage/);
 });
+
+test('core modules import successfully', async () => {
+  const modules = [
+    '../logger.js', '../path-utils.js', '../inbox-writer.js',
+    '../subscription-watcher.js', '../framework-detector.js',
+    '../source-remapper.js', '../fingerprinter.js',
+    '../payload-builder.js', '../http-server.js',
+    '../cdp-client.js', '../overlay-manager.js',
+  ];
+  for (const mod of modules) {
+    const m = await import(mod);
+    assert.ok(m, `${mod} should import`);
+  }
+});
+
+test('cdp-client exports initCDPClient and withReconnect', async () => {
+  const { initCDPClient, withReconnect } = await import('../cdp-client.js');
+  assert.equal(typeof initCDPClient, 'function');
+  assert.equal(typeof withReconnect, 'function');
+});
+
+test('overlay-manager exports installOverlay, setInspectMode, setOverlayLabel', async () => {
+  const { installOverlay, setInspectMode, setOverlayLabel } = await import('../overlay-manager.js');
+  assert.equal(typeof installOverlay, 'function');
+  assert.equal(typeof setInspectMode, 'function');
+  assert.equal(typeof setOverlayLabel, 'function');
+});
+
+test('fingerprinter exports enforceTokenBudget', async () => {
+  const { enforceTokenBudget } = await import('../fingerprinter.js');
+  assert.equal(typeof enforceTokenBudget, 'function');
+  const result = enforceTokenBudget({ small: true });
+  assert.equal(typeof result.ok, 'boolean');
+  assert.equal(typeof result.tokenCount, 'number');
+});

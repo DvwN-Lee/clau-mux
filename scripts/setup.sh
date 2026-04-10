@@ -115,6 +115,17 @@ COPILOT_ENABLED=${COPILOT_ENABLED:-1}
 CONF
 echo "[OK]   Agent config saved to .agents-enabled"
 
+# Register clmux-inspect CLI
+if [ -f "$CLMUX_DIR/bin/clmux-inspect" ]; then
+  chmod +x "$CLMUX_DIR/bin/clmux-inspect"
+  if ! grep -q "clau-mux/bin" ~/.zshrc 2>/dev/null; then
+    echo "" >> ~/.zshrc
+    echo "# clau-mux CLI tools" >> ~/.zshrc
+    echo "export PATH=\"\$HOME/clau-mux/bin:\$PATH\"" >> ~/.zshrc
+    echo "clmux-inspect CLI이 PATH에 추가되었습니다. 'source ~/.zshrc'를 실행해주세요."
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # 6. 스킬 파일 활성화/비활성화
 # ---------------------------------------------------------------------------

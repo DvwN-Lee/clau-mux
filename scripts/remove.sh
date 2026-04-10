@@ -11,6 +11,7 @@ Targets:
   gemini   Remove Gemini teammate (MCP, protocol doc, skill, config)
   codex    Remove Codex teammate (MCP, protocol doc, skill, config)
   copilot  Remove Copilot teammate (MCP, protocol doc, skill, config)
+  browser  Remove browser-service artifacts (PIDs, ports, Chrome profiles)
   all      Full uninstall (all agents + zshrc + config)
 EOF
   exit 1
@@ -146,6 +147,33 @@ with open(p, 'w') as f: json.dump(s, f, indent=2)
 }
 
 # ---------------------------------------------------------------------------
+# Remove browser-service artifacts
+# ---------------------------------------------------------------------------
+remove_browser() {
+  echo "--- Removing browser-service artifacts ---"
+  for pidfile in "$HOME/.claude/teams"/*/.browser-service.pid; do
+    [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null && rm -f "$pidfile"
+  done
+  for pidfile in "$HOME/.claude/teams"/*/.chrome.pid; do
+    [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null && rm -f "$pidfile"
+  done
+  # M5 fix (Copilot #9): platform-specific profile cleanup
+  if [[ "$OSTYPE" == darwin* ]]; then
+    rm -rf "$HOME/Library/Application Support/clau-mux/chrome-profile-"*
+  else
+    rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/clau-mux/chrome-profile-"*
+  fi
+  # Clean port/debug files from each team dir
+  for f in "$HOME/.claude/teams"/*/.browser-service.port \
+           "$HOME/.claude/teams"/*/.chrome-debug.port \
+           "$HOME/.claude/teams"/*/.inspect-subscriber \
+           "$HOME/.claude/teams"/*/.browser-service-alert; do
+    [ -f "$f" ] && rm -f "$f"
+  done
+  echo "[OK]   browser-service artifacts removed"
+}
+
+# ---------------------------------------------------------------------------
 # Remove all (full uninstall)
 # ---------------------------------------------------------------------------
 remove_all() {
@@ -157,6 +185,8 @@ remove_all() {
   remove_codex
   echo ""
   remove_copilot
+  echo ""
+  remove_browser
   echo ""
 
   echo "--- Removing clau-mux core ---"
@@ -187,6 +217,7 @@ case "$TARGET" in
   gemini)  remove_gemini ;;
   codex)   remove_codex ;;
   copilot) remove_copilot ;;
+  browser) remove_browser ;;
   all)     remove_all ;;
   *)       echo "error: unknown target '$TARGET'" >&2; usage ;;
 esac

@@ -1,7 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { validateInboxPath } from './path-utils.js';
+
+const __dirname_ib = path.dirname(fileURLToPath(import.meta.url));
+let _promptTemplate = '';
+try {
+  _promptTemplate = fs.readFileSync(
+    path.join(__dirname_ib, '..', 'docs', 'browser-inspect-agent-prompt.md'),
+    'utf8'
+  );
+} catch { /* template missing — degrade gracefully */ }
 
 export const MAX_ENTRIES = 50;
 
@@ -25,6 +35,7 @@ export function writeToInbox(teamDir, subscriber, payload) {
     timestamp: new Date().toISOString(),
     read: false,
     summary,
+    prompt_template: _promptTemplate,
   });
 
   if (entries.length > MAX_ENTRIES) {

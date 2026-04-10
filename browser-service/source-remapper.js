@@ -37,10 +37,12 @@ export function buildReactExtractionExpression() {
       let props = null;
       try {
         if (fiber.memoizedProps && typeof fiber.memoizedProps === 'object') {
+          const SAFE_PROPS = new Set(['className', 'id', 'style', 'role', 'type', 'disabled', 'placeholder', 'href', 'src', 'alt', 'name', 'value']);
           props = {};
           for (const k of Object.keys(fiber.memoizedProps)) {
-            if (typeof fiber.memoizedProps[k] !== 'function' && k !== 'children') {
-              props[k] = fiber.memoizedProps[k];
+            if (SAFE_PROPS.has(k)) {
+              const v = fiber.memoizedProps[k];
+              props[k] = typeof v === 'string' && v.length > 100 ? v.slice(0, 100) + '…' : v;
             }
           }
         }

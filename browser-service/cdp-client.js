@@ -75,7 +75,9 @@ export async function withReconnect(endpoint, work, opts = {}) {
 
     // Wire up disconnect detection — fires lost-connection error inside work()
     let disconnected = false;
+    let disconnectReject; // captured here so pidWatcher can reject the promise
     const disconnectPromise = new Promise((_resolve, reject) => {
+      disconnectReject = reject;
       client.on('disconnect', () => {
         disconnected = true;
         reject(new Error('CDP_DISCONNECT: WebSocket closed'));
@@ -104,6 +106,7 @@ export async function withReconnect(endpoint, work, opts = {}) {
           catch {
             disconnected = true;
             log.error(`Chrome PID ${pid} dead (OS-level detection)`);
+            disconnectReject(new Error(`CDP_CHROME_DEAD: PID ${pid}`));
           }
         } catch { /* pid file missing */ }
       }, 2000);

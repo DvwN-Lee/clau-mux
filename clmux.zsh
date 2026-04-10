@@ -114,7 +114,8 @@ clmux() {
       _clmux_spawn_agent "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 0 -t "$_team"
     fi
     if [[ "$browser_flag" -eq 1 ]]; then
-      _clmux_launch_browser_service "$_team" "$_team" || true
+      local _safe_team="${_team//\//-}"
+      _clmux_launch_browser_service "$_safe_team" "$_safe_team" || true
     fi
     command claude "${clmux_args[@]}"
     return
@@ -225,7 +226,8 @@ clmux() {
   fi
 
   if [[ "$browser_flag" -eq 1 ]]; then
-    _clmux_launch_browser_service "$session_name" "$_st_team" || {
+    local _safe_st_team="${_st_team//\//-}"
+    _clmux_launch_browser_service "$session_name" "$_safe_st_team" || {
       echo "warning: browser-service 실패 — 세션은 계속 진행" >&2
     }
   fi

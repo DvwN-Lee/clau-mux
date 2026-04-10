@@ -246,6 +246,8 @@ SendMessage(to: "copilot-worker", message: "분석 요청...")
 | `clmux-codex-stop -t <team>` | Codex teammate 종료 |
 | `clmux-copilot -t <team>` | Copilot CLI를 teammate로 연결 |
 | `clmux-copilot-stop -t <team>` | Copilot teammate 종료 |
+| `clmux -b` | 세션 시작 시 Browser Inspect Tool 활성화 |
+| `clmux-inspect <cmd>` | BIT CLI |
 
 ## 요구사항
 
@@ -276,3 +278,4 @@ SendMessage(to: "copilot-worker", message: "분석 요청...")
 - [Copilot Teammate 상세](docs/copilot-teammate.md)
 - [tmux 테마](docs/tmux-theme.md)
 - [트러블슈팅](docs/troubleshooting.md)
+- [Browser Inspect Tool 상세](docs/browser-inspect-tool.md)

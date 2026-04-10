@@ -31,6 +31,7 @@ clmux() {
   local gemini_flag=0
   local codex_flag=0
   local copilot_flag=0
+  local browser_flag=0
   local spawn_team=""
 
   # Parse args: -n <name> sets session name, -g/-x/-c spawn AI agents, -T <team> sets team name, rest passed to Claude Code
@@ -52,6 +53,9 @@ clmux() {
       ((i++))
     elif [[ "${args[$i]}" == "-c" ]]; then
       copilot_flag=1
+      ((i++))
+    elif [[ "${args[$i]}" == "-b" ]]; then
+      browser_flag=1
       ((i++))
     elif [[ "${args[$i]}" == "-T" ]]; then
       if [[ $((i+1)) -gt ${#args[@]} ]] || [[ "${args[$((i+1))]}" == -* ]]; then
@@ -108,6 +112,9 @@ clmux() {
       done
       python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${_cp_port}/sse"
       _clmux_spawn_agent "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 0 -t "$_team"
+    fi
+    if [[ "$browser_flag" -eq 1 ]]; then
+      _clmux_launch_browser_service "$_team" "$_team" || true
     fi
     command claude "${clmux_args[@]}"
     return
@@ -215,6 +222,12 @@ clmux() {
     done
     python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${_cp2_port}/sse"
     _clmux_spawn_agent_in_session "$session_name" "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 0 "$_st_team"
+  fi
+
+  if [[ "$browser_flag" -eq 1 ]]; then
+    _clmux_launch_browser_service "$session_name" "$_st_team" || {
+      echo "warning: browser-service 실패 — 세션은 계속 진행" >&2
+    }
   fi
 
   tmux attach-session -t "=$session_name"
@@ -623,3 +636,169 @@ _clmux_precmd() {
 }
 autoload -Uz add-zsh-hook
 add-zsh-hook precmd _clmux_precmd
+
+# ── Browser Inspect Tool ──────────────────────────────────────────────────────
+
+if _clmux_agent_enabled browser; then
+
+_clmux_launch_browser_service() {
+  local session_name="$1"
+  local team_name="$2"
+  local team_dir="$HOME/.claude/teams/$team_name"
+
+  # M5 (Copilot #9): platform-specific profile directory
+  local profile_dir
+  if [[ "$OSTYPE" == darwin* ]]; then
+    profile_dir="$HOME/Library/Application Support/clau-mux/chrome-profile-$team_name"
+  else
+    profile_dir="${XDG_STATE_HOME:-$HOME/.local/state}/clau-mux/chrome-profile-$team_name"
+  fi
+
+  local log_file="/tmp/clmux-browser-service-$team_name.log"
+  local chrome_log="/tmp/clmux-chrome-$team_name.log"
+
+  mkdir -p "$team_dir/inboxes" "$profile_dir"
+
+  local chrome_bin=""
+  for p in \
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    "/Applications/Chromium.app/Contents/MacOS/Chromium" \
+    "/usr/bin/google-chrome" \
+    "/usr/bin/chromium-browser"
+  do
+    if [[ -x "$p" ]]; then chrome_bin="$p"; break; fi
+  done
+
+  if [[ -z "$chrome_bin" ]]; then
+    echo "error: Chrome 바이너리를 찾을 수 없음 / Chrome binary not found" >&2
+    return 1
+  fi
+
+  rm -f "$profile_dir/DevToolsActivePort"
+
+  "$chrome_bin" \
+    --remote-debugging-port=0 \
+    --user-data-dir="$profile_dir" \
+    --no-first-run \
+    --no-default-browser-check \
+    --disable-default-apps \
+    --disable-background-networking \
+    --disable-component-update \
+    --disable-sync \
+    about:blank \
+    >> "$chrome_log" 2>&1 &
+  echo $! > "$team_dir/.chrome.pid"
+  # M6: chmod immediately on creation, not later
+  chmod 600 "$team_dir/.chrome.pid" 2>/dev/null
+  disown
+
+  local chrome_port=""
+  local tries=0
+  while (( tries < 25 )); do
+    if [[ -f "$profile_dir/DevToolsActivePort" ]]; then
+      chrome_port=$(head -1 "$profile_dir/DevToolsActivePort")
+      if [[ -n "$chrome_port" ]]; then break; fi
+    fi
+    sleep 0.2
+    ((tries++))
+  done
+
+  if [[ -z "$chrome_port" ]]; then
+    echo "error: Chrome DevTools 포트 감지 실패 / Chrome DevTools port detection failed" >&2
+    kill $(cat "$team_dir/.chrome.pid") 2>/dev/null
+    rm -f "$team_dir/.chrome.pid"
+    return 1
+  fi
+
+  # B1 fix: Chrome debug port → .chrome-debug.port (separate from .browser-service.port)
+  echo "$chrome_port" > "$team_dir/.chrome-debug.port"
+  chmod 600 "$team_dir/.chrome-debug.port" 2>/dev/null
+
+  local ws_endpoint="ws://127.0.0.1:$chrome_port"
+
+  node "$CLMUX_DIR/browser-service/browser-service.js" \
+    --team="$team_name" \
+    --endpoint="$ws_endpoint" \
+    --http-port=0 \
+    >> "$log_file" 2>&1 &
+  echo $! > "$team_dir/.browser-service.pid"
+  chmod 600 "$team_dir/.browser-service.pid" 2>/dev/null
+  disown
+
+  # Wait for browser-service HTTP server to be ready.
+  # browser-service.js writes its own .browser-service.port after binding.
+  tries=0
+  while (( tries < 30 )); do
+    if [[ -f "$team_dir/.browser-service.port" ]]; then
+      local http_port
+      http_port=$(cat "$team_dir/.browser-service.port")
+      if curl -sf "http://127.0.0.1:$http_port/status" -o /dev/null --max-time 0.2 2>/dev/null; then
+        chmod 600 "$team_dir/.browser-service.port" 2>/dev/null
+        echo "[clmux -b] browser-service ready (Chrome debug port=$chrome_port, HTTP port=$http_port)"
+        return 0
+      fi
+    fi
+    sleep 0.2
+    ((tries++))
+  done
+
+  echo "error: browser-service 시작 실패 / browser-service failed to start" >&2
+  return 1
+}
+
+# B2 fix: SIGTERM → 10s grace → SIGKILL escalation + complete cleanup
+_clmux_stop_browser_service() {
+  local team_name="$1"
+  local team_dir="$HOME/.claude/teams/$team_name"
+
+  # Kill browser-service first (so it stops writing to inbox)
+  local bs_pid_file="$team_dir/.browser-service.pid"
+  if [[ -f "$bs_pid_file" ]]; then
+    local bs_pid
+    bs_pid=$(cat "$bs_pid_file")
+    if [[ -n "$bs_pid" ]] && kill -0 "$bs_pid" 2>/dev/null; then
+      kill -TERM "$bs_pid" 2>/dev/null
+      # Wait up to 10s for graceful shutdown
+      local waited=0
+      while (( waited < 100 )) && kill -0 "$bs_pid" 2>/dev/null; do
+        sleep 0.1
+        ((waited++))
+      done
+      # Force kill if still alive
+      if kill -0 "$bs_pid" 2>/dev/null; then
+        echo "[clmux -b] browser-service SIGTERM timeout — escalating to SIGKILL" >&2
+        kill -KILL "$bs_pid" 2>/dev/null
+      fi
+    fi
+    rm -f "$bs_pid_file"
+  fi
+
+  # Then kill Chrome
+  local chrome_pid_file="$team_dir/.chrome.pid"
+  if [[ -f "$chrome_pid_file" ]]; then
+    local chrome_pid
+    chrome_pid=$(cat "$chrome_pid_file")
+    if [[ -n "$chrome_pid" ]] && kill -0 "$chrome_pid" 2>/dev/null; then
+      kill -TERM "$chrome_pid" 2>/dev/null
+      local waited=0
+      while (( waited < 100 )) && kill -0 "$chrome_pid" 2>/dev/null; do
+        sleep 0.1
+        ((waited++))
+      done
+      if kill -0 "$chrome_pid" 2>/dev/null; then
+        echo "[clmux -b] Chrome SIGTERM timeout — escalating to SIGKILL" >&2
+        kill -KILL "$chrome_pid" 2>/dev/null
+      fi
+    fi
+    rm -f "$chrome_pid_file"
+  fi
+
+  # Clean all runtime files
+  rm -f "$team_dir/.browser-service.port" \
+        "$team_dir/.chrome-debug.port" \
+        "$team_dir/.inspect-subscriber" \
+        "$team_dir/.browser-service-alert"
+  echo "[clmux -b] browser-service stopped"
+}
+
+fi  # _clmux_agent_enabled browser

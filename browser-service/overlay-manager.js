@@ -75,6 +75,15 @@ export async function installOverlay(session, state, onElementInspected) {
     if (frame.parentId) return; // top-level only
     log.info(`frameNavigated: ${frame.url}`);
     try {
+      // Re-inject navigate→binding bridge. addScriptToEvaluateOnNewDocument covers
+      // BOOTSTRAP_JS + HISTORY_HOOK_JS, but not the event bridge wired at install time.
+      await session.Runtime.evaluate({
+        expression: `window.addEventListener('clmux:navigate', (e) => {
+          if (typeof window.clmuxNavigate === 'function') {
+            window.clmuxNavigate(JSON.stringify(e.detail || {}));
+          }
+        });`,
+      });
       if (state.inspectModeActive) {
         await session.Overlay.setInspectMode({
           mode: 'searchForNode',

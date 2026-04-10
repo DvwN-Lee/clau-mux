@@ -17,7 +17,7 @@ import { initCDPClient, withReconnect } from './cdp-client.js';
 import { installOverlay, setInspectMode, setOverlayLabel } from './overlay-manager.js';
 import { buildDetectionExpression, parseDetectionResult } from './framework-detector.js';
 import { resolveSourceLocation } from './source-remapper.js';
-import { buildFingerprint, TRACKED_STYLE_PROPS, truncateOuterHTML, enforceTokenBudget } from './fingerprinter.js';
+import { buildFingerprint, TRACKED_STYLE_PROPS, truncateOuterHTML, enforceTokenBudget, redactSensitiveAttrs } from './fingerprinter.js';
 import { buildPayload } from './payload-builder.js';
 import { watchSubscriber, readSubscriber, writeSubscriber } from './subscription-watcher.js';
 import { writeToInbox } from './inbox-writer.js';
@@ -269,8 +269,11 @@ async function buildPayloadFromNodeId(session, nodeId, comment, framework) {
 
   const attrs = {};
   if (desc.node.attributes) {
+    const SENSITIVE_KEY = /password|token|secret|api[_-]?key|authorization/i;
     for (let i = 0; i < desc.node.attributes.length; i += 2) {
-      attrs[desc.node.attributes[i]] = desc.node.attributes[i + 1];
+      const k = desc.node.attributes[i];
+      const v = desc.node.attributes[i + 1];
+      attrs[k] = SENSITIVE_KEY.test(k) ? '[REDACTED]' : v;
     }
   }
 

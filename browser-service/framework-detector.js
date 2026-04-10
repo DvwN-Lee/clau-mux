@@ -9,8 +9,13 @@ export function buildDetectionExpression() {
         const bodyChild = document.body && document.body.firstElementChild;
         if (bodyChild) {
           const keys = Object.keys(bodyChild);
-          if (keys.some(k => k.startsWith('__reactFiber$'))) return 'react';
+          if (keys.some(k => k.startsWith('__reactFiber$') || k.startsWith('__reactContainer$'))) return 'react';
           if (bodyChild.__vue__) return 'vue';
+        }
+        const root = document.getElementById('root');
+        if (root) {
+          const rootKeys = Object.keys(root);
+          if (rootKeys.some(k => k.startsWith('__reactContainer$'))) return 'react';
         }
         if (document.body && document.body.__vue_app__) return 'vue';
         if (document.querySelector && document.querySelector('[data-source-loc]')) return 'solid';

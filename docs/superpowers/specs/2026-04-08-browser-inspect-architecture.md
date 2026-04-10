@@ -250,7 +250,7 @@ async function withReconnect(endpoint: string, work: (client: CDPSession) => Pro
 }
 ```
 
-**실패 모드**: WebSocket disconnect → 즉시 재연결 → exponential backoff (1s, 2s, 4s, 8s, 16s) → failure cap 5회 → Lead alert 파일 생성 + daemon exit.
+**실패 모드**: WebSocket disconnect → 즉시 재연결 → exponential backoff (1s, 2s, 4s) → failure cap 3회 → Lead alert 파일 생성 + daemon exit.
 
 ---
 
@@ -1195,8 +1195,8 @@ tmux session-closed hook (or clmux teardown script):
 | 오류 | 처리 전략 |
 |---|---|
 | Chrome 바이너리 없음 | daemon exit 1 + 사용자 안내 메시지 |
-| Chrome crash (PID watcher) | exponential backoff restart (1s → 2s → 4s → 8s → 16s) → cap 5회 → Lead alert + exit |
-| CDP WebSocket disconnect | 즉시 재연결 시도 → 동일 backoff → cap 5회 → Lead alert + exit |
+| Chrome crash (PID watcher) | exponential backoff restart (1s → 2s → 4s) → cap 3회 → Lead alert + exit |
+| CDP WebSocket disconnect | 즉시 재연결 시도 → 동일 backoff → cap 3회 → Lead alert + exit |
 | `DevToolsActivePort` timeout | retry × 3 → Chrome 재시작 시도 × 1 → fail |
 | Inbox write failure | log ERROR + retry 3회 → payload discard + WARN (daemon 계속 동작) |
 | Source remap all tiers fail | Tier 4 honest unknown 반환 — payload delivery는 절대 블로킹하지 않음 |

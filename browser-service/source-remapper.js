@@ -37,7 +37,7 @@ export function buildReactExtractionExpression() {
       let props = null;
       try {
         if (fiber.memoizedProps && typeof fiber.memoizedProps === 'object') {
-          const SAFE_PROPS = new Set(['className', 'id', 'style', 'role', 'type', 'disabled', 'placeholder', 'href', 'src', 'alt', 'name', 'value']);
+          const SAFE_PROPS = new Set(['className', 'id', 'role', 'type', 'disabled', 'placeholder', 'alt', 'name']);
           props = {};
           for (const k of Object.keys(fiber.memoizedProps)) {
             if (SAFE_PROPS.has(k)) {

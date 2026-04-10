@@ -40,3 +40,8 @@ test('rejects nested subdirectory under inboxes', () => {
   const p = path.join(home, '.claude', 'teams', 'proj', 'inboxes', 'nested', 'foo.json');
   assert.throws(() => validateInboxPath(p), InvalidInboxPathError);
 });
+
+test('accepts nested team path (e.g. repo/custom)', () => {
+  const p = path.join(home, '.claude', 'teams', 'repo', 'custom', 'inboxes', 'agent.json');
+  assert.doesNotThrow(() => validateInboxPath(p));
+});

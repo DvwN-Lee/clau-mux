@@ -8,10 +8,10 @@ export class InvalidInboxPathError extends Error {
   }
 }
 
-// Exact allowed pattern: ~/.claude/teams/<team>/inboxes/<agent>.json
-// - team: single path segment (no /, no ..)
+// Allowed pattern: ~/.claude/teams/<team-path>/inboxes/<agent>.json
+// - team-path: one or more path segments (supports nested team names like "repo/custom")
 // - agent: single path segment ending in .json
-const INBOX_PATTERN = /^teams\/[^/]+\/inboxes\/[^/]+\.json$/;
+const INBOX_PATTERN = /^teams\/[^/]+(?:\/[^/]+)*\/inboxes\/[^/]+\.json$/;
 
 /**
  * Validates inbox path. Mirrors bridge-mcp-server.js security pattern with tighter scope.

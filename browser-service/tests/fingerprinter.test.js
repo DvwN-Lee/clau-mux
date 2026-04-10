@@ -9,6 +9,7 @@ import {
   computeSubsetFromComputedStyles,
   truncateOuterHTML,
   estimateTokenCount,
+  redactSensitiveAttrs,
 } from '../fingerprinter.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -75,4 +76,45 @@ test('estimateTokenCount returns positive number roughly proportional to length'
   const long = estimateTokenCount('hello '.repeat(1000));
   assert.ok(short > 0);
   assert.ok(long > short * 100);
+});
+
+test('redactSensitiveAttrs redacts password attr value', () => {
+  const result = redactSensitiveAttrs('<input password="s3cr3t">');
+  assert.equal(result, '<input password="[REDACTED]">');
+});
+
+test('redactSensitiveAttrs redacts token attr value', () => {
+  const result = redactSensitiveAttrs('<meta token=\'Bearer abc\'>');
+  assert.equal(result, '<meta token=\'[REDACTED]\'>');
+});
+
+test('redactSensitiveAttrs redacts api_key attr value', () => {
+  const result = redactSensitiveAttrs('<div api_key="sk-123">');
+  assert.equal(result, '<div api_key="[REDACTED]">');
+});
+
+test('redactSensitiveAttrs redacts Authorization attr value (case-insensitive)', () => {
+  const result = redactSensitiveAttrs('<div Authorization="token xyz">');
+  assert.equal(result, '<div Authorization="[REDACTED]">');
+});
+
+test('redactSensitiveAttrs preserves non-sensitive attrs like class, id, data-foo', () => {
+  const html = '<div class="hero" id="main" data-foo="bar">';
+  assert.equal(redactSensitiveAttrs(html), html);
+});
+
+test('truncateOuterHTML redacts password/token/secret attrs (NFR-304)', () => {
+  const html = '<input type="password" value="hunter2"> <div data-token="Bearer abc123">';
+  const result = truncateOuterHTML(html);
+  assert.ok(!result.includes('hunter2'));
+  assert.ok(!result.includes('abc123'));
+  assert.ok(result.includes('[REDACTED]'));
+});
+
+test('truncateOuterHTML redacts before truncating (integration)', () => {
+  const secret = 'sk-' + 'x'.repeat(600);
+  const html = `<input token="${secret}">`;
+  const result = truncateOuterHTML(html);
+  assert.ok(!result.includes(secret));
+  assert.ok(result.includes('[REDACTED]'));
 });

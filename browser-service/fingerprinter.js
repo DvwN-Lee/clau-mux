@@ -18,9 +18,25 @@ export const TRACKED_STYLE_PROPS = [
 
 const OUTER_HTML_LIMIT = 500;
 
+export function redactSensitiveAttrs(html) {
+  if (!html) return html;
+  // Pass 1: redact explicitly named sensitive attributes (handles data-token, api_key, etc.)
+  let result = html.replace(
+    /(\b(?:password|token|secret|api[_-]?key|authorization)\b)([\s]*[=:][\s]*)(["'])((?:(?!\3)[^])*)\3/gi,
+    (m, attr, eq, q, val) => `${attr}${eq}${q}[REDACTED]${q}`,
+  );
+  // Pass 2 (NFR-304): redact value attribute on password-type inputs
+  result = result.replace(
+    /(<input[^>]*\btype=(["'])password\2[^>]*)\bvalue=(["'])[^"']*\3/gi,
+    (m, prefix, q1, q2) => `${prefix}value=${q2}[REDACTED]${q2}`,
+  );
+  return result;
+}
+
 export function truncateOuterHTML(html) {
   if (!html) return '';
   let cleaned = html.replace(/<script[\s\S]*?<\/script>/gi, '<!--script-stripped-->');
+  cleaned = redactSensitiveAttrs(cleaned);
   if (cleaned.length > OUTER_HTML_LIMIT) {
     cleaned = cleaned.slice(0, OUTER_HTML_LIMIT) + '...[truncated]';
   }

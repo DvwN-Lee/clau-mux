@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# clmux-inspect — CLI wrapper for browser-service daemon.
+
+set -euo pipefail
+
+CMD="${1:-}"
+if [ -z "$CMD" ]; then
+  cat <<EOF
+Usage: clmux-inspect <command> [args]
+
+Commands:
+  subscribe <agent>        현재 구독 agent 변경
+  unsubscribe              구독 해제
+  toggle [on|off]          inspect mode on/off 전환 (B8 — 인자 없으면 toggle)
+  query <selector> [props] 요소 computed style 측정
+  snapshot <selector>      요소 full payload 조회
+  status                   daemon 상태 확인
+
+Environment:
+  CLMUX_TEAM               team 이름 (기본: tmux session-name)
+EOF
+  exit 0
+fi
+
+TEAM="${CLMUX_TEAM:-}"
+if [ -z "$TEAM" ] && [ -n "${TMUX:-}" ]; then
+  TEAM="$(tmux display-message -p '#S')"
+fi
+if [ -z "$TEAM" ]; then
+  echo "error: CLMUX_TEAM not set (and not in tmux)" >&2
+  exit 1
+fi
+
+TEAM_DIR="$HOME/.claude/teams/$TEAM"
+PORT_FILE="$TEAM_DIR/.browser-service.port"
+
+if [ ! -f "$PORT_FILE" ]; then
+  echo '{"status":"stopped","reason":"port file not found","code":1}'
+  exit 1
+fi
+
+PORT="$(cat "$PORT_FILE")"
+BASE="http://127.0.0.1:$PORT"
+
+http_get() { curl -sf -X GET "$BASE$1"; }
+http_post() { curl -sf -X POST -H 'content-type: application/json' -d "$2" "$BASE$1"; }
+
+case "$CMD" in
+  subscribe)
+    AGENT="${2:-}"
+    if [ -z "$AGENT" ]; then echo "error: agent required" >&2; exit 2; fi
+    http_post /subscribe "{\"agent\":\"$AGENT\"}"
+    ;;
+  unsubscribe)
+    http_post /unsubscribe '{}'
+    ;;
+  toggle)
+    STATE="${2:-}"
+    case "$STATE" in
+      on)  http_post /toggle-inspect '{"active":true}' ;;
+      off) http_post /toggle-inspect '{"active":false}' ;;
+      '')  http_post /toggle-inspect '{}' ;;  # no arg → toggle current state
+      *)   echo "error: toggle expects 'on' | 'off' | (nothing)" >&2; exit 2 ;;
+    esac
+    ;;
+  query)
+    SEL="${2:-}"
+    shift 2 2>/dev/null || true
+    if [ -z "$SEL" ]; then echo "error: selector required" >&2; exit 2; fi
+    PROPS_JSON='[]'
+    if [ $# -gt 0 ]; then
+      PROPS_JSON="[$(printf '"%s",' "$@" | sed 's/,$//')]"
+    fi
+    http_post /query "{\"selector\":\"$SEL\",\"props\":$PROPS_JSON}"
+    ;;
+  snapshot)
+    SEL="${2:-}"
+    if [ -z "$SEL" ]; then echo "error: selector required" >&2; exit 2; fi
+    http_post /snapshot "{\"selector\":\"$SEL\"}"
+    ;;
+  status)
+    if OUT="$(http_get /status 2>/dev/null)"; then
+      echo "$OUT"
+      exit 0
+    else
+      echo '{"status":"stopped","code":1}'
+      exit 1
+    fi
+    ;;
+  *)
+    echo "error: unknown command: $CMD" >&2
+    exit 2
+    ;;
+esac

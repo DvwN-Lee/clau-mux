@@ -1,0 +1,28 @@
+{
+  "matchedCSSRules": [
+    {
+      "rule": {
+        "selectorList": { "text": ".card" },
+        "style": {
+          "cssProperties": [
+            { "name": "padding", "value": "12px", "disabled": false }
+          ],
+          "range": { "startLine": 5, "startColumn": 0, "endLine": 7, "endColumn": 0 }
+        },
+        "styleSheetId": "src/styles/card.css"
+      }
+    },
+    {
+      "rule": {
+        "selectorList": { "text": ".card--highlighted" },
+        "style": {
+          "cssProperties": [
+            { "name": "padding", "value": "16px", "disabled": false }
+          ],
+          "range": { "startLine": 23, "startColumn": 0, "endLine": 25, "endColumn": 0 }
+        },
+        "styleSheetId": "src/styles/card.css"
+      }
+    }
+  ]
+}

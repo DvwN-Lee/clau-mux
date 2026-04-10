@@ -62,7 +62,7 @@ export async function installOverlay(session, state, onElementInspected) {
             mode: 'searchForNode',
             highlightConfig: HIGHLIGHT_CONFIG,
           });
-          await setOverlayLabel(session, state.subscriber);
+          await setOverlayLabel(session, state.subscriber, true);
         }
       } catch (e) {
         log.warn(`SPA navigate handler failed: ${e.message}`);
@@ -80,7 +80,7 @@ export async function installOverlay(session, state, onElementInspected) {
           mode: 'searchForNode',
           highlightConfig: HIGHLIGHT_CONFIG,
         });
-        await setOverlayLabel(session, state.subscriber);
+        await setOverlayLabel(session, state.subscriber, true);
       }
     } catch (e) {
       log.warn(`post-navigation overlay re-injection failed: ${e.message}`);
@@ -90,6 +90,9 @@ export async function installOverlay(session, state, onElementInspected) {
   // Handle click events
   session.Overlay.on('inspectNodeRequested', async ({ backendNodeId }) => {
     log.info(`inspectNodeRequested: backendNodeId=${backendNodeId}`);
+
+    state.clickGeneration = (state.clickGeneration || 0) + 1;
+    const thisGeneration = state.clickGeneration;
 
     // H3 fix: if a previous comment handler is still pending (user didn't submit),
     // abort it before starting a new one. Prevents listener leak.
@@ -138,6 +141,11 @@ export async function installOverlay(session, state, onElementInspected) {
 
       const comment = await Promise.race([commentPromise, timeoutPromise]);
       clearTimeout(timeoutId);
+
+      if (thisGeneration !== state.clickGeneration) {
+        log.info(`Stale click (gen ${thisGeneration} superseded by ${state.clickGeneration}) — dropping payload`);
+        return;
+      }
 
       await onElementInspected(backendNodeId, comment);
 
@@ -200,7 +208,7 @@ export async function setInspectMode(session, state, active) {
         highlightConfig: HIGHLIGHT_CONFIG,
       });
     }
-    await setOverlayLabel(session, state.subscriber);
+    await setOverlayLabel(session, state.subscriber, state.inspectModeActive);
   } catch (e) {
     log.warn(`setInspectMode failed: ${e.message}`);
   }
@@ -209,8 +217,8 @@ export async function setInspectMode(session, state, active) {
 /**
  * Updates the overlay label shown in the browser page.
  */
-export async function setOverlayLabel(session, subscriber) {
-  const expr = `window.__clmux_set_active && window.__clmux_set_active(true, ${JSON.stringify(subscriber || '(none)')})`;
+export async function setOverlayLabel(session, subscriber, active) {
+  const expr = `window.__clmux_set_active && window.__clmux_set_active(${!!active}, ${JSON.stringify(subscriber || '(none)')})`;
   try {
     await session.Runtime.evaluate({ expression: expr });
   } catch {

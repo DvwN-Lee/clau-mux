@@ -735,6 +735,9 @@ _clmux_launch_browser_service() {
       if curl -sf "http://127.0.0.1:$http_port/status" -o /dev/null --max-time 0.2 2>/dev/null; then
         chmod 600 "$team_dir/.browser-service.port" 2>/dev/null
         echo "[clmux -b] browser-service ready (Chrome debug port=$chrome_port, HTTP port=$http_port)"
+        # FR-104: register auto-cleanup on tmux session exit
+        tmux set-hook -t "${session_name}" session-closed \
+          "run-shell 'kill \$(cat \"${team_dir}/.browser-service.pid\" 2>/dev/null) 2>/dev/null || true; kill \$(cat \"${team_dir}/.chrome.pid\" 2>/dev/null) 2>/dev/null || true; rm -f \"${team_dir}/.browser-service.port\" \"${team_dir}/.browser-service.pid\" \"${team_dir}/.chrome.pid\" \"${team_dir}/.chrome-debug.port\" \"${team_dir}/.inspect-subscriber\"'" 2>/dev/null || true
         return 0
       fi
     fi

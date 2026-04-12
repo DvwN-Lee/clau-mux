@@ -82,7 +82,7 @@ clmux() {
 
     if [[ "$gemini_flag" -eq 1 ]] && _clmux_agent_enabled gemini; then
       _clmux_ensure_team "$_team_dir" "$_team"
-      _clmux_spawn_agent gemini gemini-worker "Type your message" keys 0 colour33 1 -t "$_team"
+      _clmux_spawn_agent gemini gemini-worker "Type your message" paste 0 colour33 1 -t "$_team"
     fi
     if [[ "$codex_flag" -eq 1 ]] && _clmux_agent_enabled codex; then
       _clmux_ensure_team "$_team_dir" "$_team"
@@ -184,7 +184,7 @@ clmux() {
     _clmux_ensure_team "$_st_dir" "$_st_team"
     [[ ! -f "$_st_inbox_dir/gemini-worker.json" ]] && echo '[]' > "$_st_inbox_dir/gemini-worker.json"
     [[ ! -f "$_st_inbox_dir/team-lead.json" ]]    && echo '[]' > "$_st_inbox_dir/team-lead.json"
-    _clmux_spawn_agent_in_session "$session_name" gemini gemini-worker "Type your message" keys 0 colour33 1 "$_st_team"
+    _clmux_spawn_agent_in_session "$session_name" gemini gemini-worker "Type your message" paste 0 colour33 1 "$_st_team"
   fi
 
   if [[ "$codex_flag" -eq 1 ]] && _clmux_agent_enabled codex; then
@@ -299,7 +299,7 @@ _clmux_spawn_agent_in_session() {
   [[ -f "$CLMUX_DIR/clmux-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
   local team_name_val="${team_dir##*/}"
   zsh "$CLMUX_DIR/clmux-bridge.zsh" \
-    -p "$agent_pane" -i "$inbox" -t "$timeout" -w "$idle_pattern" -m "$input_method" \
+    -p "$agent_pane" -i "$inbox" -t "$timeout" -w "$idle_pattern" \
     >> "/tmp/clmux-bridge-${team_name_val}-${agent_name}.log" 2>&1 &
   echo $! > "$pid_file"
   disown
@@ -407,7 +407,7 @@ _clmux_spawn_agent() {
   [[ -f "$CLMUX_DIR/clmux-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
   local team_name_val="${team_dir##*/}"
   zsh "$CLMUX_DIR/clmux-bridge.zsh" \
-    -p "$agent_pane" -i "$inbox" -t "$timeout" -w "$idle_pattern" -m "$input_method" \
+    -p "$agent_pane" -i "$inbox" -t "$timeout" -w "$idle_pattern" \
     >> "/tmp/clmux-bridge-${team_name_val}-${agent_name}.log" 2>&1 &
   echo $! > "$pid_file"
   disown
@@ -491,7 +491,7 @@ if _clmux_agent_enabled gemini; then
   clmux-gemini() {
     # Spawns a Gemini CLI tmux pane as a Claude Code teammate.
     # Usage: clmux-gemini -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
-    _clmux_spawn_agent gemini gemini-worker "Type your message" keys 0 colour33 1 "$@"
+    _clmux_spawn_agent gemini gemini-worker "Type your message" paste 0 colour33 1 "$@"
   }
 
   clmux-gemini-stop() {

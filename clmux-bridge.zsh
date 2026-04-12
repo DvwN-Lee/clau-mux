@@ -44,7 +44,7 @@ AGENT_NAME=$(basename "$INBOX" .json)
 wait_for_idle() {
   local elapsed=0
   while (( elapsed < TIMEOUT )); do
-    tmux capture-pane -t "$PANE_ID" -p -S -5 | grep -qF "$IDLE_PATTERN" && return 0
+    tmux capture-pane -t "$PANE_ID" -p -S -30 | grep -qF "$IDLE_PATTERN" && return 0
     sleep 1
     (( elapsed++ ))
   done
@@ -122,16 +122,23 @@ except: print('')
 
     wait_for_idle || { echo "[clmux-bridge] warning: not idle before sending" >&2; }
 
-    if [[ "$INPUT_METHOD" == "paste" ]]; then
-      printf '%s' "$text" | tmux load-buffer -
-      tmux paste-buffer -t "$PANE_ID"
-      sleep 0.3
-      tmux send-keys -t "$PANE_ID" Enter
-    else
-      tmux send-keys -t "$PANE_ID" -l "$text"
-      sleep 0.1
-      tmux send-keys -t "$PANE_ID" Enter
+    # Named buffer paste + delayed Enter (eliminates global buffer race + minimizes Enter race)
+    _buf="clmux-${$}-${RANDOM}"
+    if ! printf '%s' "$text" | tmux load-buffer -b "$_buf" - 2>/dev/null; then
+      echo "[clmux-bridge] error: load-buffer failed (pane:$PANE_ID)" >&2
+      sleep 2
+      continue
     fi
+    if ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
+      echo "[clmux-bridge] error: paste-buffer failed (pane:$PANE_ID)" >&2
+      tmux delete-buffer -b "$_buf" 2>/dev/null
+      sleep 2
+      continue
+    fi
+
+    # Wait for CLI to render pasted text before sending Enter
+    sleep 0.3
+    tmux send-keys -t "$PANE_ID" Enter
 
     [[ -n "$ts" ]] && mark_read "$ts"
   fi

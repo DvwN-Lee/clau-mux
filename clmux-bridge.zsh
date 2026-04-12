@@ -44,7 +44,7 @@ AGENT_NAME=$(basename "$INBOX" .json)
 wait_for_idle() {
   local elapsed=0
   while (( elapsed < TIMEOUT )); do
-    tmux capture-pane -t "$PANE_ID" -p -S -30 | grep -qF "$IDLE_PATTERN" && return 0
+    tmux capture-pane -t "$PANE_ID" -p | tail -5 | grep -qF "$IDLE_PATTERN" && return 0
     sleep 1
     (( elapsed++ ))
   done
@@ -77,6 +77,7 @@ cleanup() {
 }
 trap 'cleanup; exit 0' INT TERM EXIT
 
+_defer_count=0
 while true; do
   if ! command -v tmux &>/dev/null; then
     echo "[clmux-bridge] error: tmux not in PATH, retrying..." >&2
@@ -92,9 +93,17 @@ while true; do
   msg=$(read_unread)
 
   if [[ -n "$msg" ]]; then
-    text=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d['text'])" "$msg")
-    ts=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('timestamp',''))" "$msg")
-    from=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('from','lead'))" "$msg")
+    local _parsed
+    if ! _parsed=$(python3 "$CLMUX_DIR/scripts/parse_message.py" "$msg" 2>/dev/null) || [[ -z "$_parsed" ]]; then
+      echo "[clmux-bridge] error: failed to parse message, skipping" >&2
+      ts=$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('timestamp',''))" "$msg" 2>/dev/null)
+      [[ -n "$ts" ]] && mark_read "$ts"
+      sleep 2
+      continue
+    fi
+    text="${_parsed%%$'\0'*}"; _parsed="${_parsed#*$'\0'}"
+    ts="${_parsed%%$'\0'*}"
+    from="${_parsed#*$'\0'}"
 
     echo "[clmux-bridge] → from '$from': ${text:0:80}"
 
@@ -120,7 +129,19 @@ except: print('')
       exit 0
     fi
 
-    wait_for_idle || { echo "[clmux-bridge] warning: not idle before sending" >&2; }
+    if ! wait_for_idle; then
+      (( _defer_count++ ))
+      if (( _defer_count >= 3 )); then
+        echo "[clmux-bridge] error: idle timeout after ${_defer_count} retries, skipping message" >&2
+        [[ -n "$ts" ]] && mark_read "$ts"
+        _defer_count=0
+      else
+        echo "[clmux-bridge] warning: not idle, deferring send (${_defer_count}/3)" >&2
+        sleep 2
+        continue
+      fi
+    fi
+    _defer_count=0
 
     # Named buffer paste + delayed Enter (eliminates global buffer race + minimizes Enter race)
     _buf="clmux-${$}-${RANDOM}"

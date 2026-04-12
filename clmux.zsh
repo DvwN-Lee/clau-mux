@@ -289,7 +289,7 @@ _clmux_spawn_agent_in_session() {
 
   echo "$agent_pane" > "$pane_file"
 
-  python3 "$CLMUX_DIR/scripts/update_pane.py" "$team_dir" "$agent_name" "$agent_pane" "$cli_cmd" "$task_capable"
+  python3 "$CLMUX_DIR/scripts/update_pane.py" "$team_dir" "$agent_name" "$agent_pane" "${cli_cmd%% *}" "$task_capable"
 
   if [[ "$needs_env_file" -eq 1 ]]; then
     local team_name_val="${team_dir##*/}"
@@ -392,7 +392,7 @@ _clmux_spawn_agent() {
 
   echo "$agent_pane" > "$pane_file"
 
-  python3 "$CLMUX_DIR/scripts/update_pane.py" "$team_dir" "$agent_name" "$agent_pane" "$cli_cmd" "$task_capable"
+  python3 "$CLMUX_DIR/scripts/update_pane.py" "$team_dir" "$agent_name" "$agent_pane" "${cli_cmd%% *}" "$task_capable"
 
   if [[ "$needs_env_file" -eq 1 ]]; then
     local team_name_val="${team_dir##*/}"

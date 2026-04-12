@@ -3,12 +3,13 @@
 # Generic bridge: Claude Code teammate inbox ↔ CLI tmux pane.
 # Supports Gemini CLI, Codex CLI, or any MCP-capable CLI.
 #
-# Usage: clmux-bridge.zsh -p <pane_id> -i <inbox> [-t <timeout>] [-w <idle_pattern>] [-m paste]
+# Usage: clmux-bridge.zsh -p <pane_id> -i <inbox> [-t <timeout>] [-w <idle_pattern>]
 #   -p  tmux pane ID                    (e.g. %72)
 #   -i  inbox JSON file                 (lead → agent)
 #   -t  idle-wait timeout in seconds    (default: 30)
 #   -w  grep pattern for idle detection (default: "Type your message")
-#   -m  input method: "keys" (default) or "paste" (for TUIs like Codex)
+#
+# All CLIs use named buffer paste + delayed Enter for input delivery.
 
 set -uo pipefail
 
@@ -18,16 +19,15 @@ PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 # Resolve script directory so we can locate scripts/ helpers
 CLMUX_DIR="${${(%):-%x}:A:h}"
 
-PANE_ID="" INBOX="" TIMEOUT=30 IDLE_PATTERN="Type your message" INPUT_METHOD="keys"
+PANE_ID="" INBOX="" TIMEOUT=30 IDLE_PATTERN="Type your message"
 
-while getopts "p:i:t:w:m:" opt; do
+while getopts "p:i:t:w:" opt; do
   case $opt in
     p) PANE_ID="$OPTARG" ;;
     i) INBOX="$OPTARG" ;;
     t) TIMEOUT="$OPTARG" ;;
     w) IDLE_PATTERN="$OPTARG" ;;
-    m) INPUT_METHOD="$OPTARG" ;;
-    *) echo "Usage: $0 -p <pane_id> -i <inbox> [-t <timeout>] [-w <idle_pattern>] [-m paste]" >&2; exit 1 ;;
+    *) echo "Usage: $0 -p <pane_id> -i <inbox> [-t <timeout>] [-w <idle_pattern>]" >&2; exit 1 ;;
   esac
 done
 
@@ -44,7 +44,7 @@ AGENT_NAME=$(basename "$INBOX" .json)
 wait_for_idle() {
   local elapsed=0
   while (( elapsed < TIMEOUT )); do
-    tmux capture-pane -t "$PANE_ID" -p -S -5 | grep -qF "$IDLE_PATTERN" && return 0
+    tmux capture-pane -t "$PANE_ID" -p | tail -5 | grep -qF "$IDLE_PATTERN" && return 0
     sleep 1
     (( elapsed++ ))
   done
@@ -77,6 +77,7 @@ cleanup() {
 }
 trap 'cleanup; exit 0' INT TERM EXIT
 
+_defer_count=0
 while true; do
   if ! command -v tmux &>/dev/null; then
     echo "[clmux-bridge] error: tmux not in PATH, retrying..." >&2
@@ -92,9 +93,17 @@ while true; do
   msg=$(read_unread)
 
   if [[ -n "$msg" ]]; then
-    text=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d['text'])" "$msg")
-    ts=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('timestamp',''))" "$msg")
-    from=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('from','lead'))" "$msg")
+    local _parsed
+    if ! _parsed=$(python3 "$CLMUX_DIR/scripts/parse_message.py" "$msg" 2>/dev/null) || [[ -z "$_parsed" ]]; then
+      echo "[clmux-bridge] error: failed to parse message, skipping" >&2
+      ts=$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('timestamp',''))" "$msg" 2>/dev/null)
+      [[ -n "$ts" ]] && mark_read "$ts"
+      sleep 2
+      continue
+    fi
+    text="${_parsed%%$'\0'*}"; _parsed="${_parsed#*$'\0'}"
+    ts="${_parsed%%$'\0'*}"
+    from="${_parsed#*$'\0'}"
 
     echo "[clmux-bridge] → from '$from': ${text:0:80}"
 
@@ -120,18 +129,37 @@ except: print('')
       exit 0
     fi
 
-    wait_for_idle || { echo "[clmux-bridge] warning: not idle before sending" >&2; }
-
-    if [[ "$INPUT_METHOD" == "paste" ]]; then
-      printf '%s' "$text" | tmux load-buffer -
-      tmux paste-buffer -t "$PANE_ID"
-      sleep 0.3
-      tmux send-keys -t "$PANE_ID" Enter
-    else
-      tmux send-keys -t "$PANE_ID" -l "$text"
-      sleep 0.1
-      tmux send-keys -t "$PANE_ID" Enter
+    if ! wait_for_idle; then
+      (( _defer_count++ ))
+      if (( _defer_count >= 3 )); then
+        echo "[clmux-bridge] error: idle timeout after ${_defer_count} retries, skipping message" >&2
+        [[ -n "$ts" ]] && mark_read "$ts"
+        _defer_count=0
+      else
+        echo "[clmux-bridge] warning: not idle, deferring send (${_defer_count}/3)" >&2
+        sleep 2
+        continue
+      fi
     fi
+    _defer_count=0
+
+    # Named buffer paste + delayed Enter (eliminates global buffer race + minimizes Enter race)
+    _buf="clmux-${$}-${RANDOM}"
+    if ! printf '%s' "$text" | tmux load-buffer -b "$_buf" - 2>/dev/null; then
+      echo "[clmux-bridge] error: load-buffer failed (pane:$PANE_ID)" >&2
+      sleep 2
+      continue
+    fi
+    if ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
+      echo "[clmux-bridge] error: paste-buffer failed (pane:$PANE_ID)" >&2
+      tmux delete-buffer -b "$_buf" 2>/dev/null
+      sleep 2
+      continue
+    fi
+
+    # Wait for CLI to render pasted text before sending Enter
+    sleep 0.3
+    tmux send-keys -t "$PANE_ID" Enter
 
     [[ -n "$ts" ]] && mark_read "$ts"
   fi

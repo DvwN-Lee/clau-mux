@@ -150,7 +150,7 @@ except: print('')
       sleep 2
       continue
     fi
-    if ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
+    if ! tmux paste-buffer -d -p -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
       echo "[clmux-bridge] error: paste-buffer failed (pane:$PANE_ID)" >&2
       tmux delete-buffer -b "$_buf" 2>/dev/null
       sleep 2

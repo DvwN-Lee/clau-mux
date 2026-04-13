@@ -6,7 +6,7 @@
 # Usage: clmux-bridge.zsh -p <pane_id> -i <inbox> [-t <timeout>] [-w <idle_pattern>]
 #   -p  tmux pane ID                    (e.g. %72)
 #   -i  inbox JSON file                 (lead → agent)
-#   -t  idle-wait timeout in seconds    (default: 30)
+#   -t  idle-wait timeout in seconds    (default: 60)
 #   -w  grep pattern for idle detection (default: "Type your message")
 #
 # All CLIs use named buffer paste + delayed Enter for input delivery.
@@ -19,7 +19,7 @@ PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 # Resolve script directory so we can locate scripts/ helpers
 CLMUX_DIR="${${(%):-%x}:A:h}"
 
-PANE_ID="" INBOX="" TIMEOUT=30 IDLE_PATTERN="Type your message"
+PANE_ID="" INBOX="" TIMEOUT=60 IDLE_PATTERN="Type your message"
 
 while getopts "p:i:t:w:" opt; do
   case $opt in
@@ -44,7 +44,7 @@ AGENT_NAME=$(basename "$INBOX" .json)
 wait_for_idle() {
   local elapsed=0
   while (( elapsed < TIMEOUT )); do
-    tmux capture-pane -t "$PANE_ID" -p | tail -5 | grep -qF "$IDLE_PATTERN" && return 0
+    tmux capture-pane -t "$PANE_ID" -p | grep -v '^\s*$' | tail -8 | grep -qF "$IDLE_PATTERN" && return 0
     sleep 1
     (( elapsed++ ))
   done
@@ -93,7 +93,7 @@ while true; do
   msg=$(read_unread)
 
   if [[ -n "$msg" ]]; then
-    local _parsed
+    _parsed=""
     if ! _parsed=$(python3 "$CLMUX_DIR/scripts/parse_message.py" "$msg" 2>/dev/null) || [[ -z "$_parsed" ]]; then
       echo "[clmux-bridge] error: failed to parse message, skipping" >&2
       ts=$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('timestamp',''))" "$msg" 2>/dev/null)
@@ -105,7 +105,11 @@ while true; do
     ts="${_parsed%%$'\0'*}"
     from="${_parsed#*$'\0'}"
 
-    echo "[clmux-bridge] → from '$from': ${text:0:80}"
+    if (( ${#text} > 120 )); then
+      echo "[clmux-bridge] → from '$from' (${#text} chars): ${text:0:120}…"
+    else
+      echo "[clmux-bridge] → from '$from': $text"
+    fi
 
     # Intercept shutdown_request before forwarding to pane
     msg_type=$(python3 -c "
@@ -131,35 +135,84 @@ except: print('')
 
     if ! wait_for_idle; then
       (( _defer_count++ ))
-      if (( _defer_count >= 3 )); then
+      if (( _defer_count >= 6 )); then
         echo "[clmux-bridge] error: idle timeout after ${_defer_count} retries, skipping message" >&2
         [[ -n "$ts" ]] && mark_read "$ts"
         _defer_count=0
       else
-        echo "[clmux-bridge] warning: not idle, deferring send (${_defer_count}/3)" >&2
-        sleep 2
+        echo "[clmux-bridge] warning: not idle, deferring send (${_defer_count}/6)" >&2
+        sleep 5
         continue
       fi
     fi
     _defer_count=0
 
-    # Named buffer paste + delayed Enter (eliminates global buffer race + minimizes Enter race)
-    _buf="clmux-${$}-${RANDOM}"
-    if ! printf '%s' "$text" | tmux load-buffer -b "$_buf" - 2>/dev/null; then
-      echo "[clmux-bridge] error: load-buffer failed (pane:$PANE_ID)" >&2
-      sleep 2
-      continue
-    fi
-    if ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
-      echo "[clmux-bridge] error: paste-buffer failed (pane:$PANE_ID)" >&2
-      tmux delete-buffer -b "$_buf" 2>/dev/null
-      sleep 2
-      continue
+    # Delivery: chunked paste-buffer for large msgs, single paste for small.
+    # paste-buffer uses bracketed paste (\e[200~...\e[201~) which protects newlines
+    # from being interpreted as Enter. But Gemini CLI truncates at ~1024 bytes per
+    # paste event. Fix: split into <=300 char chunks (<=900 bytes for 3-byte UTF-8),
+    # each pasted separately with bracketed paste protection.
+    _text_len=${#text}
+    if (( _text_len > 300 )); then
+      _pos=0; _csz=300; _chunk_fail=false; _ci=0
+      while (( _pos < _text_len )); do
+        _buf="clmux-${$}-${RANDOM}"
+        if ! printf '%s' "${text:$_pos:$_csz}" | tmux load-buffer -b "$_buf" - 2>/dev/null; then
+          echo "[clmux-bridge] error: chunk load-buffer failed (pane:$PANE_ID)" >&2
+          _chunk_fail=true; break
+        fi
+        if ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
+          echo "[clmux-bridge] error: chunk paste-buffer failed (pane:$PANE_ID)" >&2
+          tmux delete-buffer -b "$_buf" 2>/dev/null
+          _chunk_fail=true; break
+        fi
+        (( _pos += _csz ))
+        (( _ci++ ))
+        # Batch pause: every 5 chunks, let PTY drain to prevent buffer saturation
+        if (( _ci % 5 == 0 )); then
+          sleep 0.3
+        else
+          sleep 0.05
+        fi
+      done
+      if [[ "$_chunk_fail" == true ]]; then
+        sleep 2; continue
+      fi
+    else
+      _buf="clmux-${$}-${RANDOM}"
+      if ! printf '%s' "$text" | tmux load-buffer -b "$_buf" - 2>/dev/null; then
+        echo "[clmux-bridge] error: load-buffer failed (pane:$PANE_ID)" >&2
+        sleep 2
+        continue
+      fi
+      if ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
+        echo "[clmux-bridge] error: paste-buffer failed (pane:$PANE_ID)" >&2
+        tmux delete-buffer -b "$_buf" 2>/dev/null
+        sleep 2
+        continue
+      fi
     fi
 
-    # Wait for CLI to render pasted text before sending Enter
-    sleep 0.3
-    tmux send-keys -t "$PANE_ID" Enter
+    # Send Enter with retry. Detection strategy: compare pane content hash before
+    # and after Enter. Any change (Thinking..., response, etc.) means accepted.
+    # Idle-pattern check alone is unreliable: Gemini may process fast and return
+    # to idle before the 2s sleep completes, making it look like Enter was ignored.
+    _nchunks=$(( (_text_len / 300) + 1 ))
+    _delay=$(( 0.5 + _nchunks * 0.2 ))
+    (( _delay > 8.0 )) && _delay=8.0
+    sleep $_delay
+    _pre_hash=$(tmux capture-pane -t "$PANE_ID" -p 2>/dev/null | md5)
+    _enter_ok=false
+    for _try in 1 2 3 4 5; do
+      tmux send-keys -t "$PANE_ID" Enter
+      sleep 3
+      _post_hash=$(tmux capture-pane -t "$PANE_ID" -p 2>/dev/null | md5)
+      if [[ "$_pre_hash" != "$_post_hash" ]]; then
+        _enter_ok=true; break
+      fi
+      echo "[clmux-bridge] warning: Enter not accepted, retry (${_try}/5)" >&2
+    done
+    [[ "$_enter_ok" == false ]] && echo "[clmux-bridge] error: Enter not accepted after 5 retries" >&2
 
     [[ -n "$ts" ]] && mark_read "$ts"
   fi

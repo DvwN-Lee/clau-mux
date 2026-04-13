@@ -163,8 +163,11 @@ Gemini CLI를 Claude Code의 teammate로 연결합니다. `clmux-bridge.zsh`가 
 # 터미널에서 Gemini teammate 시작
 clmux-gemini -t <team_name>
 
+# 특정 모델로 시작
+clmux-gemini -t <team_name> -m gemini-3.1-pro-preview
+
 # Claude Code Bash tool에서 실행 시 (non-interactive shell이므로 zsh -ic 필요)
-zsh -ic "clmux-gemini -t <team_name>"
+zsh -ic "clmux-gemini -t <team_name> -m gemini-3-flash-preview"
 
 # Claude Code 내부에서 메시지 전송
 SendMessage(to: "gemini-worker", message: "...")
@@ -250,11 +253,11 @@ SendMessage(to: "<team_name>-copilot-worker", message: "...")
 | `clmux-teammates` | 현재 세션의 teammate 목록 (팀별 트리, pane ID, CLI 타입, alive/dead 상태) |
 | `clmux-ls` | 활성 세션 목록 + orphaned 세션 경고 표시 |
 | `clmux-cleanup` | attached 클라이언트 없는 orphaned 세션 일괄 제거 |
-| `clmux-gemini -t <team>` | Gemini CLI를 teammate로 연결 |
+| `clmux-gemini -t <team> [-m <model>]` | Gemini CLI를 teammate로 연결 (예: `-m gemini-3.1-pro-preview`) |
 | `clmux-gemini-stop -t <team>` | Gemini teammate 종료 |
-| `clmux-codex -t <team>` | Codex CLI를 teammate로 연결 |
+| `clmux-codex -t <team> [-m <model>]` | Codex CLI를 teammate로 연결 (예: `-m gpt-5.4`) |
 | `clmux-codex-stop -t <team>` | Codex teammate 종료 |
-| `clmux-copilot -t <team>` | Copilot CLI를 teammate로 연결 |
+| `clmux-copilot -t <team> [-m <model>]` | Copilot CLI를 teammate로 연결 (예: `-m claude-sonnet-4`) |
 | `clmux-copilot-stop -t <team>` | Copilot teammate 종료 |
 
 ## 요구사항

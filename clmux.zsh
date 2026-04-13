@@ -306,6 +306,18 @@ _clmux_spawn_agent() {
 
   [[ -z "$team_name" ]] && { echo "error: -t <team_name> required" >&2; return 1; }
 
+  # Check for name collision: reject if agent_name already exists in this session
+  local _existing_pane
+  if [[ -n "$session_name" ]]; then
+    _existing_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id} #{@agent_name}' 2>/dev/null | grep " ${agent_name}$" | head -1)
+  else
+    _existing_pane=$(tmux list-panes -F '#{pane_id} #{@agent_name}' 2>/dev/null | grep " ${agent_name}$" | head -1)
+  fi
+  if [[ -n "$_existing_pane" ]]; then
+    echo "error: '$agent_name' already exists in this session (${_existing_pane%% *}). use -n to set a different name." >&2
+    return 1
+  fi
+
   # Determine mode: out-of-tmux (-S session) vs in-tmux
   local lead_pane sess_spec=""
   if [[ -n "$session_name" ]]; then

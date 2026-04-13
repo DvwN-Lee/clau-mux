@@ -26,45 +26,16 @@ clmux() {
     return 1
   fi
 
-  local session_name=""
-  local -a clmux_args=()
-  local gemini_flag=0
-  local codex_flag=0
-  local copilot_flag=0
-  local spawn_team=""
-
-  # Parse args: -n <name> sets session name, -g/-x/-c spawn AI agents, -T <team> sets team name, rest passed to Claude Code
-  local args=("$@")
-  local i=1
-  while [[ $i -le ${#args[@]} ]]; do
-    if [[ "${args[$i]}" == "-n" ]]; then
-      if [[ $((i+1)) -gt ${#args[@]} ]] || [[ "${args[$((i+1))]}" == -* ]]; then
-        echo "error: -n requires a session name." >&2
-        return 1
-      fi
-      session_name="${args[$((i+1))]}"
-      ((i+=2))
-    elif [[ "${args[$i]}" == "-g" ]]; then
-      gemini_flag=1
-      ((i++))
-    elif [[ "${args[$i]}" == "-x" ]]; then
-      codex_flag=1
-      ((i++))
-    elif [[ "${args[$i]}" == "-c" ]]; then
-      copilot_flag=1
-      ((i++))
-    elif [[ "${args[$i]}" == "-T" ]]; then
-      if [[ $((i+1)) -gt ${#args[@]} ]] || [[ "${args[$((i+1))]}" == -* ]]; then
-        echo "error: -T requires a team name." >&2
-        return 1
-      fi
-      spawn_team="${args[$((i+1))]}"
-      ((i+=2))
-    else
-      clmux_args+=("${args[$i]}")
-      ((i++))
-    fi
-  done
+  local -a opt_g=() opt_x=() opt_c=() opt_n=() opt_T=()
+  zparseopts -D -E -- g=opt_g x=opt_x c=opt_c n:=opt_n T:=opt_T || {
+    echo "error: invalid options" >&2; return 1
+  }
+  local gemini_flag=$(( ${#opt_g} > 0 ? 1 : 0 ))
+  local codex_flag=$(( ${#opt_x} > 0 ? 1 : 0 ))
+  local copilot_flag=$(( ${#opt_c} > 0 ? 1 : 0 ))
+  local session_name="${opt_n[2]:-}"
+  local spawn_team="${opt_T[2]:-}"
+  local -a clmux_args=("$@")
 
   # Inject all valid plugins under CLMUX_PLUGIN_DIR (those with .claude-plugin/) as --plugin-dir args
   if [[ -n "$CLMUX_PLUGIN_DIR" ]]; then
@@ -80,24 +51,27 @@ clmux() {
     local _team="${spawn_team:-$(tmux display-message -p '#{session_name}')}"
     local _team_dir="$HOME/.claude/teams/$_team"
 
-    if [[ "$gemini_flag" -eq 1 ]] && _clmux_agent_enabled gemini; then
+    # Ensure team once before batch spawn
+    if { [[ $gemini_flag -eq 1 ]] && _clmux_agent_enabled gemini; } || \
+       { [[ $codex_flag  -eq 1 ]] && _clmux_agent_enabled codex; }  || \
+       { [[ $copilot_flag -eq 1 ]] && _clmux_agent_enabled copilot; }; then
       _clmux_ensure_team "$_team_dir" "$_team"
+    fi
+
+    if [[ "$gemini_flag" -eq 1 ]] && _clmux_agent_enabled gemini; then
       _clmux_spawn_agent gemini gemini-worker "Type your message" paste 0 colour33 1 -t "$_team"
     fi
     if [[ "$codex_flag" -eq 1 ]] && _clmux_agent_enabled codex; then
-      _clmux_ensure_team "$_team_dir" "$_team"
       python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
         --outbox "$_team_dir/inboxes/team-lead.json" --agent codex-worker &>/dev/null
       _clmux_spawn_agent "codex --full-auto" codex-worker "›" paste 1 colour36 0 -t "$_team"
     fi
     if [[ "$copilot_flag" -eq 1 ]] && _clmux_agent_enabled copilot; then
       local _cp_outbox="$_team_dir/inboxes/team-lead.json"
-      _clmux_ensure_team "$_team_dir" "$_team"
       [[ ! -f "$_cp_outbox" ]] && echo '[]' > "$_cp_outbox"
       local _cp_port
       _cp_port=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
-      CLMUX_OUTBOX="$_cp_outbox" CLMUX_AGENT="copilot-worker" \
-        node "$CLMUX_DIR/bridge-mcp-server.js" --http "$_cp_port" \
+      node "$CLMUX_DIR/bridge-mcp-server.js" --http "$_cp_port" \
         >> "/tmp/clmux-mcp-http-${_team}-copilot-worker.log" 2>&1 &
       printf '%s\n' "$!" > "$_team_dir/.copilot-worker-mcp-http.pid"
       disown
@@ -109,6 +83,7 @@ clmux() {
       python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${_cp_port}/sse"
       _clmux_spawn_agent "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 0 -t "$_team"
     fi
+    _clmux_layout_commit "$TMUX_PANE"
     command claude "${clmux_args[@]}"
     return
   fi
@@ -180,26 +155,28 @@ clmux() {
   local _st_dir="$HOME/.claude/teams/$_st_team"
   local _st_inbox_dir="$_st_dir/inboxes"
 
-  if [[ "$gemini_flag" -eq 1 ]] && _clmux_agent_enabled gemini; then
+  # Ensure team once before batch spawn
+  if { [[ $gemini_flag -eq 1 ]] && _clmux_agent_enabled gemini; } || \
+     { [[ $codex_flag  -eq 1 ]] && _clmux_agent_enabled codex; }  || \
+     { [[ $copilot_flag -eq 1 ]] && _clmux_agent_enabled copilot; }; then
     _clmux_ensure_team "$_st_dir" "$_st_team"
-    [[ ! -f "$_st_inbox_dir/gemini-worker.json" ]] && echo '[]' > "$_st_inbox_dir/gemini-worker.json"
-    [[ ! -f "$_st_inbox_dir/team-lead.json" ]]    && echo '[]' > "$_st_inbox_dir/team-lead.json"
-    _clmux_spawn_agent_in_session "$session_name" gemini gemini-worker "Type your message" paste 0 colour33 1 "$_st_team"
+  fi
+
+  local _lead_pane
+  _lead_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' 2>/dev/null | head -1)
+
+  if [[ "$gemini_flag" -eq 1 ]] && _clmux_agent_enabled gemini; then
+    _clmux_spawn_agent gemini gemini-worker "Type your message" paste 0 colour33 1 -S "$session_name" -t "$_st_team"
   fi
 
   if [[ "$codex_flag" -eq 1 ]] && _clmux_agent_enabled codex; then
-    _clmux_ensure_team "$_st_dir" "$_st_team"
-    [[ ! -f "$_st_inbox_dir/codex-worker.json" ]] && echo '[]' > "$_st_inbox_dir/codex-worker.json"
-    [[ ! -f "$_st_inbox_dir/team-lead.json" ]]    && echo '[]' > "$_st_inbox_dir/team-lead.json"
     python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
       --outbox "$_st_inbox_dir/team-lead.json" --agent codex-worker &>/dev/null
-    _clmux_spawn_agent_in_session "$session_name" "codex --full-auto" codex-worker "›" paste 1 colour36 0 "$_st_team"
+    _clmux_spawn_agent "codex --full-auto" codex-worker "›" paste 1 colour36 0 -S "$session_name" -t "$_st_team"
   fi
 
   if [[ "$copilot_flag" -eq 1 ]] && _clmux_agent_enabled copilot; then
     local _cp2_outbox="$_st_inbox_dir/team-lead.json"
-    _clmux_ensure_team "$_st_dir" "$_st_team"
-    [[ ! -f "$_st_inbox_dir/copilot-worker.json" ]] && echo '[]' > "$_st_inbox_dir/copilot-worker.json"
     [[ ! -f "$_cp2_outbox" ]] && echo '[]' > "$_cp2_outbox"
     local _cp2_port
     _cp2_port=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
@@ -214,71 +191,43 @@ clmux() {
       sleep 0.2
     done
     python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${_cp2_port}/sse"
-    _clmux_spawn_agent_in_session "$session_name" "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 0 "$_st_team"
+    _clmux_spawn_agent "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 0 -S "$session_name" -t "$_st_team"
   fi
+
+  _clmux_layout_commit "$_lead_pane" "=$session_name"
 
   tmux attach-session -t "=$session_name"
 }
 
-# ── _clmux_spawn_agent_in_session ─────────────────────────────────────────────
-# Used by clmux() to spawn a Gemini agent inside an already-created session
-# (outside tmux context — uses tmux send-keys trick is not needed, we just
-# call _clmux_spawn_agent directly after attach would be too late, so we
-# replicate the pane-split logic here directly via tmux commands).
-# Usage: _clmux_spawn_agent_in_session <session> <cli_cmd> <agent_name> \
-#                                       <idle_pattern> <input_method> \
-#                                       <needs_env_file> <border_color> \
-#                                       <task_capable> <team_name> [timeout_sec]
-_clmux_spawn_agent_in_session() {
-  local session_name="$1"
-  local cli_cmd="$2"
-  local default_agent_name="$3"
-  local idle_pattern="$4"
-  local input_method="$5"
-  local needs_env_file="$6"
-  local border_color="$7"
-  local task_capable="${8:-0}"
-  local team_name="$9"
-  local timeout="${10:-30}"
+# ── _clmux_make_pane ──────────────────────────────────────────────────────────
+# Creates a new agent pane and sets display options. No resize.
+# Usage: _clmux_make_pane <lead_pane> <outbox> <agent_name> <cli_cmd> \
+#                          <border_color> [<sess_spec>]
+# Outputs pane_id to stdout, or empty string on failure.
+_clmux_make_pane() {
+  local lead_pane="$1" outbox="$2" agent_name="$3" cli_cmd="$4" \
+        border_color="$5" sess_spec="${6:-}"
 
-  local agent_name="$default_agent_name"
-  local team_dir="$HOME/.claude/teams/$team_name"
-  local inbox_dir="$team_dir/inboxes"
-  local inbox="$inbox_dir/$agent_name.json"
-  local outbox="$inbox_dir/team-lead.json"
-  local pid_file="$team_dir/.${agent_name}-bridge.pid"
-  local pane_file="$team_dir/.${agent_name}-pane"
-
-  _clmux_ensure_team "$team_dir" "$team_name"
-  [[ ! -f "$inbox" ]]  && echo '[]' > "$inbox"
-  [[ ! -f "$outbox" ]] && echo '[]' > "$outbox"
-
-  local lead_pane
-  lead_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | head -1)
+  local -a _t=()
+  [[ -n "$sess_spec" ]] && _t=(-t "$sess_spec")
 
   local pane_count
-  pane_count=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | wc -l | tr -d ' ')
+  pane_count=$(tmux list-panes "${_t[@]}" -F '#{pane_id}' 2>/dev/null | wc -l | tr -d ' ')
 
   local agent_pane
   if (( pane_count <= 1 )); then
-    agent_pane=$(tmux split-window -t "$lead_pane" -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
-    tmux resize-pane -t "$agent_pane" -x 70%
+    agent_pane=$(tmux split-window -t "$lead_pane" -h -P -F '#{pane_id}' \
+      "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd" 2>/dev/null)
   else
     local last_pane
-    last_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | grep -v "^${lead_pane}$" | tail -1)
-    agent_pane=$(tmux split-window -t "$last_pane" -v -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
+    last_pane=$(tmux list-panes "${_t[@]}" -F '#{pane_id}' | grep -v "^${lead_pane}$" | tail -1)
+    agent_pane=$(tmux split-window -t "$last_pane" -v -P -F '#{pane_id}' \
+      "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd" 2>/dev/null)
+  fi
 
-    local teammate_panes
-    teammate_panes=($(tmux list-panes -t "=$session_name" -F '#{pane_id}' | grep -v "^${lead_pane}$"))
-    local count=${#teammate_panes[@]}
-    if (( count > 1 )); then
-      local win_height
-      win_height=$(tmux display-message -t "=$session_name" -p '#{window_height}')
-      local each=$(( win_height / count ))
-      for p in "${teammate_panes[@]}"; do
-        tmux resize-pane -t "$p" -y "$each"
-      done
-    fi
+  if [[ -z "$agent_pane" ]]; then
+    echo ""
+    return 1
   fi
 
   tmux set-option -p -t "$agent_pane" allow-rename off
@@ -287,32 +236,47 @@ _clmux_spawn_agent_in_session() {
   tmux set-option -p -t "$agent_pane" pane-border-format "#[fg=${border_color},bold] #{@agent_name} #[default]"
   tmux select-pane -t "$lead_pane"
 
-  echo "$agent_pane" > "$pane_file"
+  echo "$agent_pane"
+}
 
-  python3 "$CLMUX_DIR/scripts/update_pane.py" "$team_dir" "$agent_name" "$agent_pane" "${cli_cmd%% *}" "$task_capable"
+# ── _clmux_layout_commit ─────────────────────────────────────────────────────
+# Rebalances pane layout after batch spawn. Call once after all panes created.
+# Usage: _clmux_layout_commit <lead_pane> [<sess_spec>]
+_clmux_layout_commit() {
+  local lead_pane="$1" sess_spec="${2:-}"
 
-  if [[ "$needs_env_file" -eq 1 ]]; then
-    local team_name_val="${team_dir##*/}"
-    printf 'CLMUX_OUTBOX=%s\nCLMUX_AGENT=%s\nCLMUX_TEAM=%s\n' "$outbox" "$agent_name" "$team_name_val" > "$team_dir/.bridge-${agent_name}.env"
+  local -a _t=()
+  [[ -n "$sess_spec" ]] && _t=(-t "$sess_spec")
+
+  local -a teammate_panes
+  teammate_panes=($(tmux list-panes "${_t[@]}" -F '#{pane_id}' | grep -v "^${lead_pane}$"))
+  local count=${#teammate_panes[@]}
+  (( count == 0 )) && return 0
+
+  # Set right-column width
+  tmux resize-pane -t "${teammate_panes[1]}" -x 70%
+  (( count <= 1 )) && return 0
+
+  # Distribute vertical space equally
+  local win_height
+  if [[ -n "$sess_spec" ]]; then
+    win_height=$(tmux display-message -t "$sess_spec" -p '#{window_height}')
+  else
+    win_height=$(tmux display-message -p '#{window_height}')
   fi
-
-  [[ -f "$CLMUX_DIR/clmux-bridge.zsh" ]] || { echo "error: cannot find clau-mux directory" >&2; return 1; }
-  local team_name_val="${team_dir##*/}"
-  zsh "$CLMUX_DIR/clmux-bridge.zsh" \
-    -p "$agent_pane" -i "$inbox" -t "$timeout" -w "$idle_pattern" \
-    >> "/tmp/clmux-bridge-${team_name_val}-${agent_name}.log" 2>&1 &
-  echo $! > "$pid_file"
-  disown
-
-  echo "[clmux] $agent_name attached — pane:$agent_pane  team:$team_name"
+  local each=$(( win_height / count ))
+  local p
+  for p in "${teammate_panes[@]}"; do
+    tmux resize-pane -t "$p" -y "$each"
+  done
 }
 
 # ── _clmux_spawn_agent ────────────────────────────────────────────────────────
-# Shared spawn logic for clmux-gemini and clmux-codex.
+# Shared spawn logic. Works both inside tmux and outside (with -S <session>).
 # Usage: _clmux_spawn_agent <cli_cmd> <default_agent_name> <idle_pattern> \
 #                           <input_method> <needs_env_file> <border_color> \
 #                           <task_capable> \
-#                           [-t <team>] [-n <agent_name>] [-x <timeout>]
+#                           [-S <session>] [-t <team>] [-n <agent_name>] [-x <timeout>]
 _clmux_spawn_agent() {
   local cli_cmd="$1"
   local default_agent_name="$2"
@@ -323,21 +287,31 @@ _clmux_spawn_agent() {
   local task_capable="${7:-0}"
   shift 7
 
-  [[ -z "$TMUX" ]] && { echo "error: _clmux_spawn_agent must be run inside a tmux session" >&2; return 1; }
-  command -v "${cli_cmd%% *}" &>/dev/null || { echo "error: ${cli_cmd%% *} CLI not found in PATH" >&2; return 1; }
-
-  local team_name="" agent_name="$default_agent_name" timeout=30
+  local team_name="" agent_name="$default_agent_name" timeout=30 session_name=""
   local OPTIND=1
-  while getopts "t:n:x:" opt; do
+  while getopts "S:t:n:x:" opt; do
     case $opt in
+      S) session_name="$OPTARG" ;;
       t) team_name="$OPTARG" ;;
       n) agent_name="$OPTARG" ;;
       x) timeout="$OPTARG" ;;
-      *) echo "Usage: _clmux_spawn_agent ... -t <team_name> [-n <name>] [-x <timeout>]" >&2; return 1 ;;
+      *) echo "Usage: _clmux_spawn_agent ... [-S <session>] -t <team_name> [-n <name>] [-x <timeout>]" >&2; return 1 ;;
     esac
   done
 
   [[ -z "$team_name" ]] && { echo "error: -t <team_name> required" >&2; return 1; }
+
+  # Determine mode: out-of-tmux (-S session) vs in-tmux
+  local lead_pane sess_spec=""
+  if [[ -n "$session_name" ]]; then
+    lead_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' 2>/dev/null | head -1)
+    [[ -z "$lead_pane" ]] && { echo "error: session '$session_name' not found" >&2; return 1; }
+    sess_spec="=$session_name"
+  else
+    [[ -z "$TMUX" ]] && { echo "error: _clmux_spawn_agent must be run inside a tmux session" >&2; return 1; }
+    command -v "${cli_cmd%% *}" &>/dev/null || { echo "error: ${cli_cmd%% *} CLI not found in PATH" >&2; return 1; }
+    lead_pane="${TMUX_PANE}"
+  fi
 
   local team_dir="$HOME/.claude/teams/$team_name"
   [[ ! -d "$team_dir" ]] && { echo "error: team '$team_name' not found at $team_dir" >&2; return 1; }
@@ -352,43 +326,14 @@ _clmux_spawn_agent() {
   [[ -f "$inbox" ]]  || echo '[]' > "$inbox"
   [[ -f "$outbox" ]] || echo '[]' > "$outbox"
 
-  local lead_pane="${TMUX_PANE}"
-
   # Codex: update config.toml BEFORE pane spawn (env_clear() strips PATH/HOME)
   if [[ "${cli_cmd%% *}" == "codex" ]]; then
     python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" --outbox "$outbox" --agent "$agent_name" &>/dev/null
   fi
 
-  local pane_count
-  pane_count=$(tmux list-panes -F '#{pane_id}' | wc -l | tr -d ' ')
-
   local agent_pane
-  if (( pane_count <= 1 )); then
-    agent_pane=$(tmux split-window -t "$lead_pane" -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
-    tmux resize-pane -t "$agent_pane" -x 70%
-  else
-    local last_teammate
-    last_teammate=$(tmux list-panes -F '#{pane_id}' | grep -v "^${lead_pane}$" | tail -1)
-    agent_pane=$(tmux split-window -t "$last_teammate" -v -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
-
-    local teammate_panes
-    teammate_panes=($(tmux list-panes -F '#{pane_id}' | grep -v "^${lead_pane}$"))
-    local count=${#teammate_panes[@]}
-    if (( count > 1 )); then
-      local win_height
-      win_height=$(tmux display-message -p '#{window_height}')
-      local each_height=$(( win_height / count ))
-      for p in "${teammate_panes[@]}"; do
-        tmux resize-pane -t "$p" -y "$each_height"
-      done
-    fi
-  fi
-
-  tmux set-option -p -t "$agent_pane" allow-rename off
-  tmux select-pane -t "$agent_pane" -T "$agent_name"
-  tmux set-option -p -t "$agent_pane" @agent_name "$agent_name"
-  tmux set-option -p -t "$agent_pane" pane-border-format "#[fg=${border_color},bold] #{@agent_name} #[default]"
-  tmux select-pane -t "$lead_pane"
+  agent_pane=$(_clmux_make_pane "$lead_pane" "$outbox" "$agent_name" "$cli_cmd" "$border_color" "$sess_spec")
+  [[ -z "$agent_pane" ]] && { echo "error: failed to create pane for $agent_name" >&2; return 1; }
 
   echo "$agent_pane" > "$pane_file"
 
@@ -412,7 +357,7 @@ _clmux_spawn_agent() {
   echo $! > "$pid_file"
   disown
 
-  echo "[clmux-${cli_cmd}] $agent_name attached — pane:$agent_pane  bridge PID:$(< "$pid_file")"
+  echo "[clmux] $agent_name attached — pane:$agent_pane  bridge PID:$(< "$pid_file")"
 }
 
 # ── _clmux_stop_agent ─────────────────────────────────────────────────────────
@@ -491,7 +436,8 @@ if _clmux_agent_enabled gemini; then
   clmux-gemini() {
     # Spawns a Gemini CLI tmux pane as a Claude Code teammate.
     # Usage: clmux-gemini -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
-    _clmux_spawn_agent gemini gemini-worker "Type your message" paste 0 colour33 1 "$@"
+    _clmux_spawn_agent gemini gemini-worker "Type your message" paste 0 colour33 1 "$@" || return
+    _clmux_layout_commit "$TMUX_PANE"
   }
 
   clmux-gemini-stop() {
@@ -505,7 +451,8 @@ if _clmux_agent_enabled codex; then
   clmux-codex() {
     # Spawns a Codex CLI tmux pane as a Claude Code teammate.
     # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
-    _clmux_spawn_agent "codex --full-auto" codex-worker "›" paste 1 colour36 0 "$@"
+    _clmux_spawn_agent "codex --full-auto" codex-worker "›" paste 1 colour36 0 "$@" || return
+    _clmux_layout_commit "$TMUX_PANE"
   }
 
   clmux-codex-stop() {
@@ -565,7 +512,8 @@ if _clmux_agent_enabled copilot; then
     # Register URL in Copilot mcp-config.json
     python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${port}/sse"
 
-    _clmux_spawn_agent "copilot --allow-all-tools" copilot-worker "Enter @ to mention" paste 1 colour98 0 "$@"
+    _clmux_spawn_agent "copilot --allow-all-tools" copilot-worker "Enter @ to mention" paste 1 colour98 0 "$@" || return
+    _clmux_layout_commit "$TMUX_PANE"
   }
 
   clmux-copilot-stop() {

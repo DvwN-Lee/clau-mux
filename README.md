@@ -142,6 +142,14 @@ $ clmux-ls
 
 # orphaned 세션 일괄 제거
 $ clmux-cleanup
+
+# 현재 세션의 teammates 확인 (Claude 내부에서 실행 가능)
+$ clmux-teammates
+# 출력 예시:
+# llm-migration
+#   ├ %2  gemini-worker (gemini) [alive]
+#   ├ %3  codex-worker (codex) [dead]
+#   └ %5  impl-worker (claude/sonnet) [alive]
 ```
 
 > **tmux 내부에서 실행하는 경우**: `$TMUX` 환경변수가 설정되어 있으면 세션 관리 없이
@@ -222,9 +230,10 @@ clmux-copilot -t my-team
 
 # 3. Claude Code 내부에서 메시지 전송
 TeamCreate(team_name: "my-team")
-SendMessage(to: "gemini-worker", message: "리뷰 요청...")
-SendMessage(to: "codex-worker", message: "구현 요청...")
-SendMessage(to: "copilot-worker", message: "분석 요청...")
+SendMessage(to: "<team_name>-gemini-worker", message: "...")
+SendMessage(to: "<team_name>-codex-worker", message: "...")
+SendMessage(to: "<team_name>-copilot-worker", message: "...")
+
 ```
 
 ## 명령어 요약
@@ -238,6 +247,7 @@ SendMessage(to: "copilot-worker", message: "분석 요청...")
 | `clmux -c` | 세션 시작 시 Copilot teammate 자동 스폰 |
 | `clmux -T <team>` | `-g`/`-x`/`-c` 와 함께 사용 — teammate에 사용할 팀 이름 지정 |
 | 그 외 모든 옵션 | Claude Code에 그대로 전달 (`--resume`, `--continue` 등) |
+| `clmux-teammates` | 현재 세션의 teammate 목록 (팀별 트리, pane ID, CLI 타입, alive/dead 상태) |
 | `clmux-ls` | 활성 세션 목록 + orphaned 세션 경고 표시 |
 | `clmux-cleanup` | attached 클라이언트 없는 orphaned 세션 일괄 제거 |
 | `clmux-gemini -t <team>` | Gemini CLI를 teammate로 연결 |

@@ -5,3 +5,6 @@ ANALYSIS.md
 docs/*-retrospective.md
 .worktrees/
 scripts/__pycache__/
+/GEMINI.md
+/AGENTS.md
+/COPILOT.md

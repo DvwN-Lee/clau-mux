@@ -44,7 +44,7 @@ AGENT_NAME=$(basename "$INBOX" .json)
 wait_for_idle() {
   local elapsed=0
   while (( elapsed < TIMEOUT )); do
-    tmux capture-pane -t "$PANE_ID" -p | tail -5 | grep -qF "$IDLE_PATTERN" && return 0
+    tmux capture-pane -t "$PANE_ID" -p | grep -qF "$IDLE_PATTERN" && return 0
     sleep 1
     (( elapsed++ ))
   done

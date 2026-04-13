@@ -3,6 +3,51 @@ set -euo pipefail
 
 CLMUX_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+# ---------------------------------------------------------------------------
+# Utility: append_protocol <src> <dst>
+# Idempotent: wraps content in <!-- clmux-protocol-start/end --> markers.
+# ---------------------------------------------------------------------------
+append_protocol() {
+  local src="$1"
+  local dst="$2"
+
+  if [[ ! -f "$src" ]]; then
+    echo "[WARN] Protocol source not found: $src"
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$dst")"
+
+  local start_marker="<!-- clmux-protocol-start -->"
+  local end_marker="<!-- clmux-protocol-end -->"
+  local tmp
+  tmp="$(mktemp)"
+
+  { echo "$start_marker"; cat "$src"; echo "$end_marker"; } > "$tmp"
+
+  if [[ ! -f "$dst" ]]; then
+    mv "$tmp" "$dst"
+    echo "[OK]   Created $dst with protocol"
+  elif grep -qF "$start_marker" "$dst"; then
+    awk -v new_file="$tmp" '
+      BEGIN { in_block=0 }
+      /<!-- clmux-protocol-start -->/ { in_block=1 }
+      !in_block { print }
+      in_block && /<!-- clmux-protocol-end -->/ {
+        in_block=0
+        while ((getline line < new_file) > 0) print line
+      }
+    ' "$dst" > "${dst}.new" && mv "${dst}.new" "$dst"
+    rm -f "$tmp"
+    echo "[OK]   Updated protocol in $dst"
+  else
+    printf '\n' >> "$dst"
+    cat "$tmp" >> "$dst"
+    rm -f "$tmp"
+    echo "[OK]   Appended protocol to $dst"
+  fi
+}
+
 echo "=== clau-mux setup ==="
 echo "Directory: $CLMUX_DIR"
 echo ""
@@ -65,6 +110,7 @@ if [[ "$gemini_answer" =~ ^[Yy]$ ]]; then
   else
     echo "[WARN] gemini CLI not found — install it to use Gemini teammate"
   fi
+  append_protocol "$CLMUX_DIR/prompt/GEMINI.md" "$HOME/.gemini/GEMINI.md"
 else
   GEMINI_ENABLED=0
   echo "[SKIP] Gemini teammate disabled"
@@ -84,6 +130,7 @@ if [[ "$codex_answer" =~ ^[Yy]$ ]]; then
   else
     echo "[WARN] codex CLI not found — install it to use Codex teammate"
   fi
+  append_protocol "$CLMUX_DIR/prompt/AGENTS.md" "$HOME/.codex/instructions.md"
 else
   CODEX_ENABLED=0
   echo "[SKIP] Codex teammate disabled"
@@ -103,6 +150,7 @@ if [[ "$copilot_answer" =~ ^[Yy]$ ]]; then
   else
     echo "[WARN] copilot CLI not found — install @github/copilot to use Copilot teammate"
   fi
+  append_protocol "$CLMUX_DIR/prompt/COPILOT.md" "$HOME/.copilot/instructions.md"
 else
   COPILOT_ENABLED=0
   echo "[SKIP] Copilot teammate disabled"
@@ -152,20 +200,6 @@ if [[ -d "$CACHE_BASE" ]]; then
     done
     echo "[OK]   Skill cache synced"
   fi
-fi
-
-# ---------------------------------------------------------------------------
-# 7. 지시 파일 생성 (GEMINI.md, AGENTS.md, COPILOT.md)
-# ---------------------------------------------------------------------------
-SYNC_ARGS=""
-[[ "${GEMINI_ENABLED:-1}" -eq 1 ]] && SYNC_ARGS="$SYNC_ARGS --gemini"
-[[ "${CODEX_ENABLED:-1}" -eq 1 ]] && SYNC_ARGS="$SYNC_ARGS --codex"
-[[ "${COPILOT_ENABLED:-1}" -eq 1 ]] && SYNC_ARGS="$SYNC_ARGS --copilot"
-if [[ -n "$SYNC_ARGS" ]]; then
-  bash "$CLMUX_DIR/scripts/sync-protocol.sh" $SYNC_ARGS
-  echo "[OK]   Protocol files synced"
-else
-  echo "[SKIP] No agents enabled — protocol files not generated"
 fi
 
 echo ""

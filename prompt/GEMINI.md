@@ -1,7 +1,6 @@
-<!-- Generated from teammate-protocol.md. Do not edit directly. -->
 # Team Protocol for gemini-worker
 
-You are `gemini-worker`, operating inside a multi-agent team managed by Claude Code.
+You are `gemini-worker` (or the specific name assigned via `-n`), operating inside a multi-agent team managed by Claude Code.
 
 ## Response delivery
 

@@ -19,10 +19,10 @@ flowchart LR
   end
 
   subgraph Bridge
-    inbox[inbox.json]
+    inbox["{agent}.json"]
     bridge[clmux-bridge.zsh]
     mcp[bridge-mcp-server.js]
-    outbox[outbox.json]
+    outbox[team-lead.json]
   end
 
   subgraph Teammates["Teammates (선택적)"]
@@ -33,7 +33,7 @@ flowchart LR
 
   CC -- "SendMessage" --> inbox
   inbox -- "polling 2s" --> bridge
-  bridge -. "send-keys" .-> G
+  bridge -. "paste-buffer" .-> G
   bridge -. "paste-buffer" .-> X
   bridge -. "paste-buffer" .-> P
   G -. "write_to_lead (MCP)" .-> mcp
@@ -43,6 +43,8 @@ flowchart LR
   outbox -- "teammate-message" --> CC
 ```
 
+> 실제 파일: 에이전트별 inbox (`<agent-name>.json`)와 공용 outbox (`team-lead.json`)가 `~/.claude/teams/<team>/inboxes/`에 생성됩니다.
+
 ## 기능
 
 - **세션 격리**: 각 Claude Code 인스턴스를 독립 tmux 세션으로 분리
@@ -51,6 +53,7 @@ flowchart LR
 - **Codex Teammate**: OpenAI Codex CLI를 Claude Code teammate로 연결 (MCP bridge)
 - **Copilot Teammate**: GitHub Copilot CLI를 Claude Code teammate로 연결 (MCP bridge / HTTP)
 - **tmux 테마**: 커스텀 상태바, 마우스 토글, copy mode
+- **플러그인 자동 로드**: `CLMUX_PLUGIN_DIR` 환경변수 설정 시, 해당 디렉토리의 유효한 플러그인을 자동으로 `--plugin-dir` 인자로 전달
 
 ## 설치
 
@@ -111,7 +114,7 @@ bash ~/clau-mux/scripts/remove.sh all
 # 세션 이름 없이 실행 — 현재 디렉토리 해시(6자)로 자동 지정
 $ clmux
 
-# 세션 이름 직접 지정
+# 세션 이름 직접 지정 (실제 세션명: <현재_디렉토리>/PO, 예: clau-mux/PO)
 $ clmux -n PO
 
 # Claude Code 옵션 전달
@@ -189,6 +192,9 @@ clmux-codex -t <team_name>
 # Claude Code Bash tool에서 실행 시
 zsh -ic "clmux-codex -t <team_name>"
 
+# 특정 모델로 시작
+clmux-codex -t <team_name> -m gpt-5.4
+
 # Claude Code 내부에서 메시지 전송
 SendMessage(to: "codex-worker", message: "...")
 
@@ -209,6 +215,9 @@ clmux-copilot -t <team_name>
 # Claude Code Bash tool에서 실행 시
 zsh -ic "clmux-copilot -t <team_name>"
 
+# 특정 모델로 시작
+clmux-copilot -t <team_name> -m claude-sonnet-4
+
 # Claude Code 내부에서 메시지 전송
 SendMessage(to: "copilot-worker", message: "...")
 
@@ -217,6 +226,8 @@ clmux-copilot-stop -t <team_name>
 ```
 
 자세한 내용은 [Copilot Teammate 상세](docs/copilot-teammate.md)를 참고하세요.
+
+> **참고**: `clmux -c`로 스폰 시 `copilot --yolo` 플래그, `clmux-copilot`으로 스폰 시 `copilot --allow-all-tools` 플래그가 사용됩니다.
 
 #### 전체 워크플로우 예시
 
@@ -233,9 +244,9 @@ clmux-copilot -t my-team
 
 # 3. Claude Code 내부에서 메시지 전송
 TeamCreate(team_name: "my-team")
-SendMessage(to: "<team_name>-gemini-worker", message: "...")
-SendMessage(to: "<team_name>-codex-worker", message: "...")
-SendMessage(to: "<team_name>-copilot-worker", message: "...")
+SendMessage(to: "gemini-worker", message: "...")
+SendMessage(to: "codex-worker", message: "...")
+SendMessage(to: "copilot-worker", message: "...")
 
 ```
 
@@ -243,7 +254,7 @@ SendMessage(to: "<team_name>-copilot-worker", message: "...")
 
 | 옵션 | 설명 |
 |------|------|
-| `clmux -n <name>` | tmux 세션 이름 직접 지정 |
+| `clmux -n <name>` | tmux 세션 이름 직접 지정 (실제 생성 이름: `<현재_디렉토리>/<name>`) |
 | `-n` 없이 실행 | 현재 디렉토리 경로의 md5 해시 앞 6자를 세션 이름으로 자동 지정 |
 | `clmux -g` | 세션 시작 시 Gemini teammate 자동 스폰 |
 | `clmux -x` | 세션 시작 시 Codex teammate 자동 스폰 |
@@ -253,12 +264,12 @@ SendMessage(to: "<team_name>-copilot-worker", message: "...")
 | `clmux-teammates` | 현재 세션의 teammate 목록 (팀별 트리, pane ID, CLI 타입, alive/dead 상태) |
 | `clmux-ls` | 활성 세션 목록 + orphaned 세션 경고 표시 |
 | `clmux-cleanup` | attached 클라이언트 없는 orphaned 세션 일괄 제거 |
-| `clmux-gemini -t <team> [-m <model>]` | Gemini CLI를 teammate로 연결 (예: `-m gemini-3.1-pro-preview`) |
-| `clmux-gemini-stop -t <team>` | Gemini teammate 종료 |
-| `clmux-codex -t <team> [-m <model>]` | Codex CLI를 teammate로 연결 (예: `-m gpt-5.4`) |
-| `clmux-codex-stop -t <team>` | Codex teammate 종료 |
-| `clmux-copilot -t <team> [-m <model>]` | Copilot CLI를 teammate로 연결 (예: `-m claude-sonnet-4`) |
-| `clmux-copilot-stop -t <team>` | Copilot teammate 종료 |
+| `clmux-gemini -t <team> [-n <name>] [-x <sec>] [-m <model>]` | Gemini CLI를 teammate로 연결 (예: `-m gemini-3.1-pro-preview`) |
+| `clmux-gemini-stop -t <team> [-n <name>]` | Gemini teammate 종료 |
+| `clmux-codex -t <team> [-n <name>] [-x <sec>] [-m <model>]` | Codex CLI를 teammate로 연결 (예: `-m gpt-5.4`) |
+| `clmux-codex-stop -t <team> [-n <name>]` | Codex teammate 종료 |
+| `clmux-copilot -t <team> [-n <name>] [-x <sec>] [-m <model>]` | Copilot CLI를 teammate로 연결 (예: `-m claude-sonnet-4`) |
+| `clmux-copilot-stop -t <team> [-n <name>]` | Copilot teammate 종료 |
 
 ## 요구사항
 
@@ -272,6 +283,7 @@ SendMessage(to: "<team_name>-copilot-worker", message: "...")
 - Codex CLI (`codex`) — Codex teammate 사용 시
 - Copilot CLI (`copilot`) — Copilot teammate 사용 시
 - Node.js / npm — MCP 서버 (`npx clau-mux-bridge`) 실행 시
+- `curl` — Copilot MCP 서버 헬스체크 시
 - Python 3 — bridge 헬퍼 스크립트 실행 시
 
 ## 주의사항
@@ -289,3 +301,5 @@ SendMessage(to: "<team_name>-copilot-worker", message: "...")
 - [Copilot Teammate 상세](docs/copilot-teammate.md)
 - [tmux 테마](docs/tmux-theme.md)
 - [트러블슈팅](docs/troubleshooting.md)
+- [Hooks 설계 회고](docs/hooks-retrospective.md)
+- [Hooks 트러블슈팅](docs/hooks-troubleshooting.md)

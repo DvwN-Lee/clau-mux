@@ -10,7 +10,7 @@ Spawn a Gemini CLI pane as a Claude Code teammate using the MCP bridge architect
 
 ## Architecture
 
-- **Lead → Gemini**: bridge (`clmux-bridge.zsh`) polls inbox → `tmux send-keys` to Gemini pane
+- **Lead → Gemini**: bridge (`clmux-bridge.zsh`) polls inbox → `tmux paste-buffer -p` (bracketed paste) to Gemini pane
 - **Gemini → Lead**: Gemini calls `write_to_lead` MCP tool → `bridge-mcp-server.js` writes directly to outbox
 
 ## Spawn Gemini Teammate
@@ -40,7 +40,10 @@ This resets inbox/outbox, spawns Gemini in a tmux pane, starts the bridge proces
 Options:
 - `-t <team_name>` — required
 - `-n <agent_name>` — default: `gemini-worker`
+- `-m <model>` — Gemini model (예: `gemini-3.1-pro-preview`, `gemini-3-flash-preview`)
 - `-x <timeout>` — idle-wait timeout, default: `30`
+
+> 동일 이름의 teammate가 이미 존재하면 spawn이 거부됨. `-n`으로 다른 이름 지정 가능.
 
 ### Step 3: Send initial activation message
 
@@ -85,12 +88,19 @@ Claude Code's `SendMessage` only routes to file-based inboxes for teams initiali
 
 The bridge (`clmux-bridge.zsh`) is an inbox relay only:
 
-- Polls inbox every 2s → sends to Gemini via `tmux send-keys`
+- Polls inbox every 2s → sends to Gemini via `tmux paste-buffer -p` (bracketed paste)
 - Does NOT wait for or collect responses
 - On `shutdown_request`: kills pane → writes `shutdown_approved` JSON (with `requestId`) to lead inbox → exits
 - On pane gone (unexpected): writes plain-text shutdown notice to lead inbox (no `requestId`), then exits
 
 Responses go through MCP: Gemini calls `write_to_lead` → outbox → Claude Code reads via teammate protocol.
+
+## Teammates 확인
+
+현재 세션의 teammate 목록 확인:
+```bash
+zsh -ic "clmux-teammates"
+```
 
 ## Error Handling
 

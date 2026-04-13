@@ -13,7 +13,7 @@ Spawn a GitHub Copilot CLI pane as a Claude Code teammate using the MCP bridge a
 - **Lead → Copilot**: bridge (`clmux-bridge.zsh`) polls inbox → `tmux paste-buffer` + Enter to Copilot pane
 - **Copilot → Lead**: Copilot calls `write_to_lead` MCP tool → `bridge-mcp-server.js` writes directly to outbox
 
-Note: Copilot uses paste-buffer input mode (not send-keys) because its TUI doesn't accept standard key injection.
+Note: All bridge teammates use `paste-buffer -p` (bracketed paste) for reliable text delivery.
 
 ## Spawn Copilot Teammate
 
@@ -42,7 +42,10 @@ This resets inbox/outbox, spawns Copilot in a tmux pane, starts the bridge proce
 Options:
 - `-t <team_name>` — required
 - `-n <agent_name>` — default: `copilot-worker`
+- `-m <model>` — Copilot model (예: `claude-sonnet-4`, `gpt-5`)
 - `-x <timeout>` — idle-wait timeout, default: `30`
+
+> 동일 이름의 teammate가 이미 존재하면 spawn이 거부됨. `-n`으로 다른 이름 지정 가능.
 
 ### Step 3: Send initial activation message
 
@@ -81,7 +84,7 @@ zsh -ic "clmux-copilot-stop -t <team_name>"
 
 ## Copilot-specific Notes
 
-- **Paste mode**: Copilot TUI requires `tmux paste-buffer` instead of `send-keys` for text input.
+- **Paste mode**: All bridge teammates use `tmux paste-buffer -p` (bracketed paste) for text input.
 - **Env file**: Copilot CLI runs env_clear on MCP subprocesses. The bridge writes `~/.claude/teams/<team_name>/.bridge-copilot-worker.env` so the MCP server can find `CLMUX_OUTBOX` and `CLMUX_AGENT`.
 - **AGENTS.md**: Copilot reads `AGENTS.md` for project instructions including `write_to_lead` usage.
 - **Idle pattern**: Bridge waits for `Enter @ to mention` before delivering queued messages.
@@ -90,12 +93,19 @@ zsh -ic "clmux-copilot-stop -t <team_name>"
 
 The bridge (`clmux-bridge.zsh`) is an inbox relay only:
 
-- Polls inbox every 2s → sends to Copilot via `tmux paste-buffer` + Enter
+- Polls inbox every 2s → sends to Copilot via `tmux paste-buffer -p` + Enter
 - Does NOT wait for or collect responses
 - On `shutdown_request`: kills pane → writes `shutdown_approved` JSON (with `requestId`) to lead inbox → exits
 - On pane gone (unexpected): writes plain-text shutdown notice to lead inbox (no `requestId`), then exits
 
 Responses go through MCP: Copilot calls `write_to_lead` → outbox → Claude Code reads via teammate protocol.
+
+## Teammates 확인
+
+현재 세션의 teammate 목록 확인:
+```bash
+zsh -ic "clmux-teammates"
+```
 
 ## Error Handling
 

@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.3.2 — 2026-04-15
+
+### Added
+- **clmux-pipeline**: tmux + iTerm session lifecycle wrapper. Subcommands
+  `create / shutdown / shutdown-tagged / list / info / kill`. Graceful-first
+  shutdown (Claude Code `/exit`, shell `exit`, fallback `C-d`) with
+  timeout-based force fallback. iTerm window close by stored window-id only —
+  never pattern matching. See `docs/pipeline.md`.
+- `docs/pipeline.md` — user guide + architecture + safety invariants
+
+### Fixed
+- Regression guard for prior-session incident where AppleScript
+  `contents of session` grep closed unrelated iTerm windows. Pipeline's safety
+  invariants (id-only close, graceful-first, per-session isolation) codified
+  and covered by `tests/test_clmux_pipeline.sh` T12 (safety regression test).
+
+### Tests
+- `tests/test_clmux_pipeline.sh` — 13 shell integration tests covering create
+  (headless + iTerm + tag + cwd), shutdown (graceful / dry-run / force /
+  timeout fallback), shutdown-tagged, list, info, safety regression, and
+  session-name injection rejection. Baseline 78 pytest suite unaffected.
+
 ## 1.3.1 — 2026-04-15
 
 ### Added

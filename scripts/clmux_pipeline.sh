@@ -53,6 +53,7 @@ _format_uptime() {
 _date_from_epoch() {
     local ts="$1"
     [[ -z "$ts" ]] && { echo "-"; return; }
+    # macOS (BSD) date uses -r; GNU date uses -d
     if date -r "$ts" "+%Y-%m-%d %H:%M:%S" 2>/dev/null; then
         return
     fi
@@ -69,9 +70,25 @@ Usage: clmux_pipeline.sh <subcommand> [options]
 
 Subcommands:
   create <name> [--headless] [--cwd <path>] [--tag <tag>]
+      Create a tmux session. Without --headless, opens an iTerm2 window
+      and stores its integer window id in @iterm_window_id.
+      Prints the first pane id (e.g. %141) on stdout.
+
   shutdown <name> [--timeout <sec>] [--force] [--dry-run]
+      Gracefully shut down a session (default timeout: 10s).
+      Exit codes: 0=clean, 2=force fallback used, 3=iTerm close failed.
+
   shutdown-tagged <tag> [--timeout <sec>]
+      Gracefully shut down all sessions tagged with <tag>.
+
+  list [--tag <filter>]
+      List pipeline sessions with NAME, PANE, WINDOW_ID, TAG, UPTIME columns.
+
+  info <name>
+      Detailed dump of a single session.
+
   kill <name>
+      Alias for: shutdown <name> --force
 USAGE
     exit 1
 }
@@ -106,13 +123,18 @@ cmd_create() {
 
     _require_tmux
 
+    # Create tmux session
     tmux new-session -d -s "$name" -c "$cwd" "exec zsh"
+
+    # Store creation timestamp
     tmux set-option -t "$name" @pipeline_created_at "$(date +%s)"
 
+    # Store tag if provided
     if [[ -n "$tag" ]]; then
         tmux set-option -t "$name" @pipeline_tag "$tag"
     fi
 
+    # iTerm path (skipped in headless mode)
     if [[ "$headless" -eq 0 ]]; then
         local wid
         wid=$(osascript - "$name" <<'APPLESCRIPT' 2>/dev/null
@@ -133,6 +155,7 @@ APPLESCRIPT
         fi
     fi
 
+    # Print first pane id
     tmux list-panes -t "$name" -F '#{pane_id}' | head -1
 }
 
@@ -200,6 +223,7 @@ cmd_shutdown() {
     # Graceful path
     # -----------
 
+    # Send appropriate exit signal to each pane
     while IFS=' ' read -r pane_id pane_cmd; do
         case "$pane_cmd" in
             claude|node)
@@ -217,6 +241,7 @@ cmd_shutdown() {
         esac
     done < <(tmux list-panes -t "$name" -F '#{pane_id} #{pane_current_command}' 2>/dev/null || true)
 
+    # Wait loop — session may self-destruct once all shells exit
     local elapsed=0
     while tmux has-session -t "$name" 2>/dev/null && (( elapsed < timeout )); do
         sleep 1
@@ -297,6 +322,102 @@ cmd_shutdown_tagged() {
 }
 
 # ---------------------------------------------------------------------------
+# list
+# ---------------------------------------------------------------------------
+
+cmd_list() {
+    local tag_filter=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --tag) tag_filter="$2"; shift 2 ;;
+            -*)    echo "ERROR: unknown option $1" >&2; exit 1 ;;
+            *)     echo "ERROR: unexpected argument $1" >&2; exit 1 ;;
+        esac
+    done
+
+    _require_tmux
+
+    local now
+    now=$(date +%s)
+
+    printf "%-16s %-8s %-12s %-14s %s\n" "NAME" "PANE" "WINDOW_ID" "TAG" "UPTIME"
+
+    local sess
+    for sess in $(tmux list-sessions -F '#{session_name}' 2>/dev/null || true); do
+        local wid tag created_at uptime pane_id
+        wid=$(tmux show-option -t "$sess" -v @iterm_window_id 2>/dev/null || true)
+        tag=$(tmux show-option -t "$sess" -v @pipeline_tag 2>/dev/null || true)
+        created_at=$(tmux show-option -t "$sess" -v @pipeline_created_at 2>/dev/null || true)
+        pane_id=$(tmux list-panes -t "$sess" -F '#{pane_id}' 2>/dev/null | head -1 || true)
+
+        # Apply tag filter if set
+        if [[ -n "$tag_filter" && "$tag" != "$tag_filter" ]]; then
+            continue
+        fi
+
+        if [[ -n "$created_at" ]]; then
+            uptime=$(_format_uptime $(( now - created_at )))
+        else
+            uptime="-"
+        fi
+
+        printf "%-16s %-8s %-12s %-14s %s\n" \
+            "$sess" \
+            "${pane_id:--}" \
+            "${wid:--}" \
+            "${tag:--}" \
+            "$uptime"
+    done
+}
+
+# ---------------------------------------------------------------------------
+# info
+# ---------------------------------------------------------------------------
+
+cmd_info() {
+    local name=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -*) echo "ERROR: unknown option $1" >&2; exit 1 ;;
+            *)
+                if [[ -z "$name" ]]; then
+                    name="$1"; shift
+                else
+                    echo "ERROR: unexpected argument $1" >&2; exit 1
+                fi
+                ;;
+        esac
+    done
+
+    [[ -z "$name" ]] && { echo "ERROR: session name required" >&2; exit 1; }
+
+    _require_tmux
+
+    if ! tmux has-session -t "$name" 2>/dev/null; then
+        echo "ERROR: session '$name' not found" >&2
+        exit 1
+    fi
+
+    local wid tag created_at
+    wid=$(tmux show-option -t "$name" -v @iterm_window_id 2>/dev/null || true)
+    tag=$(tmux show-option -t "$name" -v @pipeline_tag 2>/dev/null || true)
+    created_at=$(tmux show-option -t "$name" -v @pipeline_created_at 2>/dev/null || true)
+
+    echo "name: $name"
+    echo "window_id: ${wid:--}"
+    echo "tag: ${tag:--}"
+    if [[ -n "$created_at" ]]; then
+        echo "created_at: $(_date_from_epoch "$created_at")"
+    else
+        echo "created_at: -"
+    fi
+    echo "panes:"
+    tmux list-panes -t "$name" -F '  #{pane_id}  #{pane_current_command}' 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
 # kill (legacy alias)
 # ---------------------------------------------------------------------------
 
@@ -321,6 +442,8 @@ case "$subcmd" in
     create)          cmd_create "$@" ;;
     shutdown)        cmd_shutdown "$@" ;;
     shutdown-tagged) cmd_shutdown_tagged "$@" ;;
+    list)            cmd_list "$@" ;;
+    info)            cmd_info "$@" ;;
     kill)            cmd_kill "$@" ;;
     --help|-h)       _usage ;;
     *)

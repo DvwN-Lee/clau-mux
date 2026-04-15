@@ -285,6 +285,12 @@ _clmux_spawn_agent_in_session() {
   tmux select-pane -t "$agent_pane" -T "$agent_name"
   tmux set-option -p -t "$agent_pane" @agent_name "$agent_name"
   tmux set-option -p -t "$agent_pane" pane-border-format "#[fg=${border_color},bold] #{@agent_name} #[default]"
+  # Tmux-Native State: bridge identity stored on the pane itself.
+  # When the pane dies, these options vanish — making "agent alive" =
+  # "pane alive" structurally true (no separate config field can drift).
+  tmux set-option -p -t "$agent_pane" @clmux-agent "$agent_name"
+  tmux set-option -p -t "$agent_pane" @clmux-team "${team_dir##*/}"
+  tmux set-option -p -t "$agent_pane" @clmux-bridge "1"
   tmux select-pane -t "$lead_pane"
 
   echo "$agent_pane" > "$pane_file"
@@ -388,6 +394,12 @@ _clmux_spawn_agent() {
   tmux select-pane -t "$agent_pane" -T "$agent_name"
   tmux set-option -p -t "$agent_pane" @agent_name "$agent_name"
   tmux set-option -p -t "$agent_pane" pane-border-format "#[fg=${border_color},bold] #{@agent_name} #[default]"
+  # Tmux-Native State: bridge identity stored on the pane itself.
+  # When the pane dies, these options vanish — making "agent alive" =
+  # "pane alive" structurally true (no separate config field can drift).
+  tmux set-option -p -t "$agent_pane" @clmux-agent "$agent_name"
+  tmux set-option -p -t "$agent_pane" @clmux-team "${team_dir##*/}"
+  tmux set-option -p -t "$agent_pane" @clmux-bridge "1"
   tmux select-pane -t "$lead_pane"
 
   echo "$agent_pane" > "$pane_file"

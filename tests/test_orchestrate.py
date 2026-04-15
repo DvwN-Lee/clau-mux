@@ -491,3 +491,42 @@ class TestThread:
             "H1: illegal envelope must still be logged for audit"
         # Index state unchanged (still CREATED)
         assert orch.read_thread_index()[tid]["state"] == "CREATED"
+
+
+class TestInbox:
+    def test_add_inbox_alert_creates_jsonl(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.add_inbox_alert("%128", {
+            "thread_id": "t-001",
+            "kind": "delegate",
+            "from": "%105",
+            "summary": "do x",
+        })
+        alerts = orch.read_inbox("%128")
+        assert len(alerts) == 1
+        assert alerts[0]["thread_id"] == "t-001"
+        assert "received_at" in alerts[0]
+
+    def test_mark_inbox_read_moves_to_archive(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.add_inbox_alert("%128", {"thread_id": "t-001", "kind": "delegate"})
+        orch.add_inbox_alert("%128", {"thread_id": "t-002", "kind": "progress"})
+        orch.mark_inbox_read("%128")
+        assert orch.read_inbox("%128") == []
+        # Archive contains both
+        archive_path = tmp_path / ".claude" / "orchestration" / "inbox_archive" / "%128.jsonl"
+        archived = [json.loads(l) for l in archive_path.read_text().splitlines() if l.strip()]
+        assert len(archived) == 2
+
+    def test_read_inbox_empty_when_none(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        assert orch.read_inbox("%128") == []
+
+    def test_mark_inbox_read_when_empty_is_noop(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.mark_inbox_read("%128")  # no error
+        assert orch.read_inbox("%128") == []

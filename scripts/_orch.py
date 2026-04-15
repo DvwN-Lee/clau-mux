@@ -572,3 +572,61 @@ def close_thread(tid: str, note: str = "") -> None:
         idx[tid]["updated_at"] = _now_ts()
         idx[tid]["close_note"] = note
         _write_thread_index(idx)
+
+
+# ─── inbox ──────────────────────────────────────────────────────────────────
+
+def _inbox_path(pane_id: str) -> Path:
+    return root() / "inbox" / f"{pane_id}.jsonl"
+
+
+def _inbox_archive_path(pane_id: str) -> Path:
+    return root() / "inbox_archive" / f"{pane_id}.jsonl"
+
+
+def add_inbox_alert(pane_id: str, alert: dict) -> None:
+    """Append a notification alert to pane's inbox (pending)."""
+    ensure_layout()
+    record = dict(alert)
+    record["received_at"] = _now_ts()
+    path = _inbox_path(pane_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    with file_lock(str(path)):
+        with sigterm_guard():
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
+
+
+def read_inbox(pane_id: str) -> list:
+    """Return pending alerts (not yet marked read). Preserves order."""
+    path = _inbox_path(pane_id)
+    if not path.is_file():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return out
+
+
+def mark_inbox_read(pane_id: str) -> None:
+    """Move all pending alerts to archive. Inbox cleared."""
+    ensure_layout()
+    path = _inbox_path(pane_id)
+    archive = _inbox_archive_path(pane_id)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    with file_lock(str(path)):
+        if not path.is_file():
+            return
+        content = path.read_text(encoding="utf-8")
+        if not content.strip():
+            path.unlink()
+            return
+        with sigterm_guard():
+            with open(archive, "a", encoding="utf-8") as af:
+                af.write(content)
+            path.unlink()

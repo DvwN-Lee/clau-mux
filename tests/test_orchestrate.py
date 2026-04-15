@@ -201,6 +201,50 @@ class TestEnvelope:
         with pytest.raises(orch.EnvelopeError, match="required_changes.*must be list"):
             orch.validate_envelope(env)
 
+    def test_validate_blocked_requires_question(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        env = orch.make_envelope(
+            thread_id="t-100", from_="%128", to="%105",
+            kind="blocked", body={},  # missing question
+        )
+        with pytest.raises(orch.EnvelopeError, match="question"):
+            orch.validate_envelope(env)
+
+    def test_validate_blocked_happy_path(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        env = orch.make_envelope(
+            thread_id="t-101", from_="%128", to="%105",
+            kind="blocked", body={"question": "PostgreSQL or MySQL?"},
+        )
+        orch.validate_envelope(env)  # no exception
+
+    def test_validate_blocked_options_must_be_list(self, tmp_path, monkeypatch):
+        """options[] must be a list, not a string."""
+        orch = _import_orch(monkeypatch, tmp_path)
+        env = orch.make_envelope(
+            thread_id="t-102", from_="%128", to="%105",
+            kind="blocked", body={"question": "x?", "options": "not a list"},
+        )
+        with pytest.raises(orch.EnvelopeError, match="options.*must be list"):
+            orch.validate_envelope(env)
+
+    def test_validate_reply_requires_answer(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        env = orch.make_envelope(
+            thread_id="t-103", from_="%105", to="%128",
+            kind="reply", body={},  # missing answer
+        )
+        with pytest.raises(orch.EnvelopeError, match="answer"):
+            orch.validate_envelope(env)
+
+    def test_validate_reply_happy_path(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        env = orch.make_envelope(
+            thread_id="t-104", from_="%105", to="%128",
+            kind="reply", body={"answer": "PostgreSQL"},
+        )
+        orch.validate_envelope(env)  # no exception
+
 
 class TestMasterLock:
     def test_claim_master_when_none(self, tmp_path, monkeypatch):
@@ -492,6 +536,59 @@ class TestThread:
         # Index state unchanged (still CREATED)
         assert orch.read_thread_index()[tid]["state"] == "CREATED"
 
+    def test_transition_blocked_from_in_progress(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%105", to="%128", kind="delegate",
+            body={"scope": "x", "success_criteria": "y"},
+        ))
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%128", to="%105", kind="ack", body={},
+        ))
+        assert orch.read_thread_index()[tid]["state"] == "IN_PROGRESS"
+        orch._apply_transition(tid, "blocked")
+        assert orch.read_thread_index()[tid]["state"] == "BLOCKED"
+
+    def test_transition_reply_returns_to_in_progress(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%105", to="%128", kind="delegate",
+            body={"scope": "x", "success_criteria": "y"},
+        ))
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%128", to="%105", kind="ack", body={},
+        ))
+        orch._apply_transition(tid, "blocked")
+        assert orch.read_thread_index()[tid]["state"] == "BLOCKED"
+        orch._apply_transition(tid, "reply")
+        assert orch.read_thread_index()[tid]["state"] == "IN_PROGRESS"
+
+    def test_blocked_from_created_raises(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        with pytest.raises(orch.TransitionError):
+            orch._apply_transition(tid, "blocked")
+
+    def test_reply_from_in_progress_raises(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%105", to="%128", kind="delegate",
+            body={"scope": "x", "success_criteria": "y"},
+        ))
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%128", to="%105", kind="ack", body={},
+        ))
+        assert orch.read_thread_index()[tid]["state"] == "IN_PROGRESS"
+        with pytest.raises(orch.TransitionError):
+            orch._apply_transition(tid, "reply")
+
 
 class TestInbox:
     def test_add_inbox_alert_creates_jsonl(self, tmp_path, monkeypatch):
@@ -560,7 +657,7 @@ class TestNotify:
             recorded.append(("load-buffer", buf, len(data)))
         monkeypatch.setattr(orch, "_tmux_load_buffer", fake_load)
 
-        orch.notify_pane("%128", "[orch] thread=t-001 kind=delegate from=%105")
+        orch.notify_pane("%128", "# orch:delegate thread=t-001 from=%105")
 
         kinds = [r[0] if isinstance(r, tuple) else r for r in recorded]
         # Expect load-buffer → paste-buffer → send-keys Enter
@@ -579,6 +676,50 @@ class TestNotify:
         # Should not raise, just return False
         ok = orch.notify_pane("%128", "hello")
         assert ok is False
+
+    def test_notify_message_uses_comment_prefix(self, tmp_path, monkeypatch):
+        """[Issue #25] notify_pane messages emitted by the CLI must start with
+        `# orch:` (zsh/bash comment prefix) — NOT `[orch]` which zsh expands
+        as a glob pattern, producing `no matches found: [orch]` errors and
+        polluting the prompt.
+
+        We exercise this through the CLI subprocess path rather than calling
+        notify_pane directly, because the failure mode is specific to the
+        composed message strings in the command handlers.
+        """
+        import subprocess, json as _json
+        cli = SCRIPTS / "clmux_orchestrate.py"
+        recorded = []
+
+        # Read the source of the CLI module and verify no handler emits `[orch]`
+        src = cli.read_text()
+        # Every notify_pane call in the CLI uses f-string starting with either
+        # `[orch]` (OLD, forbidden) or `# orch:` (NEW).
+        assert "notify_pane" in src
+        # Fail if the forbidden prefix reappears inside an f-string argument
+        # to notify_pane. Look for the literal `"[orch]` and `f"[orch]` anywhere.
+        for bad in ('"[orch]', "'[orch]", 'f"[orch]', "f'[orch]"):
+            assert bad not in src, f"Found forbidden prefix {bad!r} — Issue #25 regression"
+        # At least one `# orch:` must appear (the new convention is in use)
+        assert "# orch:" in src, "Expected `# orch:` prefix to be used by notify_pane callers"
+
+    def test_notify_pane_respects_no_notify_env(self, tmp_path, monkeypatch):
+        """Setting CLMUX_ORCH_NO_NOTIFY=1 causes notify_pane to return False
+        without invoking tmux — required for TestCLI subprocess isolation.
+        """
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        # Even with tmux available, the env var suppresses notification.
+        monkeypatch.setattr(orch.shutil, "which", lambda cmd: "/usr/bin/tmux")
+        monkeypatch.setenv("CLMUX_ORCH_NO_NOTIFY", "1")
+        calls = []
+        monkeypatch.setattr(orch.subprocess, "run",
+                            lambda *a, **kw: calls.append(a) or type("R", (), {"returncode": 0})())
+        monkeypatch.setattr(orch, "_tmux_load_buffer",
+                            lambda buf, data: calls.append(("load-buffer", buf)))
+        ok = orch.notify_pane("%105", "should not be sent")
+        assert ok is False
+        assert calls == []  # no tmux invocation
 
 
 class TestMeeting:
@@ -712,6 +853,9 @@ class TestCLI:
     def _run(self, tmp_path, *args, stdin=None):
         env = os.environ.copy()
         env["HOME"] = str(tmp_path)
+        env["CLMUX_ORCH_NO_NOTIFY"] = "1"  # prevent subprocess notify_pane
+                                            # from pasting into the operator's
+                                            # real tmux session (test isolation)
         return subprocess.run(
             ["python3", str(self.CLI), *args],
             env=env, input=stdin, text=True, capture_output=True,
@@ -723,7 +867,8 @@ class TestCLI:
         out = r.stdout
         for sub in ("set-master", "handover", "release-master",
                     "register-sub", "delegate",
-                    "ack", "progress", "report", "accept", "reject", "close",
+                    "ack", "progress", "report", "accept", "reject",
+                    "blocked", "reply", "close",
                     "meeting", "inbox", "thread", "panes", "resume"):
             assert sub in out
 
@@ -805,3 +950,71 @@ class TestCLI:
         state = json.loads(r.stdout)
         assert state["role"] == "master"
         assert len(state["in_flight_threads"]) == 1
+
+    def test_cli_blocked_command(self, tmp_path):
+        """Sub posts a blocked envelope; thread state becomes BLOCKED, inbox alert exists."""
+        self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
+        self._run(tmp_path, "register-sub", "--pane", "%128", "--master", "%105")
+        r = self._run(tmp_path, "delegate",
+                      "--from", "%105", "--to", "%128",
+                      "--scope", "x", "--criteria", "y", "--json")
+        tid = json.loads(r.stdout)["thread_id"]
+        self._run(tmp_path, "ack",
+                  "--thread", tid, "--from", "%128", "--to", "%105")
+        # Now IN_PROGRESS; post blocked
+        r = self._run(tmp_path, "blocked",
+                      "--thread", tid, "--from", "%128", "--to", "%105",
+                      "--question", "PostgreSQL or MySQL?",
+                      "--options", "pg", "--options", "mysql",
+                      "--urgency", "normal",
+                      "--json")
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["thread_id"] == tid
+        assert out["state"] == "BLOCKED"
+        # Master inbox has a blocked alert
+        r2 = self._run(tmp_path, "inbox", "--pane", "%105", "--json")
+        alerts = json.loads(r2.stdout)
+        assert any(a["kind"] == "blocked" for a in alerts)
+        # Thread history contains the blocked envelope with options list + urgency
+        r3 = self._run(tmp_path, "thread", "--id", tid, "--json")
+        records = json.loads(r3.stdout)
+        blocked_recs = [rec for rec in records if rec["kind"] == "blocked"]
+        assert len(blocked_recs) == 1
+        assert blocked_recs[0]["body"]["question"] == "PostgreSQL or MySQL?"
+        assert blocked_recs[0]["body"]["options"] == ["pg", "mysql"]
+        assert blocked_recs[0]["body"]["urgency"] == "normal"
+
+    def test_cli_reply_command(self, tmp_path):
+        """Master replies; thread returns to IN_PROGRESS; sub inbox notified."""
+        self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
+        self._run(tmp_path, "register-sub", "--pane", "%128", "--master", "%105")
+        r = self._run(tmp_path, "delegate",
+                      "--from", "%105", "--to", "%128",
+                      "--scope", "x", "--criteria", "y", "--json")
+        tid = json.loads(r.stdout)["thread_id"]
+        self._run(tmp_path, "ack",
+                  "--thread", tid, "--from", "%128", "--to", "%105")
+        self._run(tmp_path, "blocked",
+                  "--thread", tid, "--from", "%128", "--to", "%105",
+                  "--question", "x?")
+        # Now BLOCKED; post reply
+        r = self._run(tmp_path, "reply",
+                      "--thread", tid, "--from", "%105", "--to", "%128",
+                      "--answer", "PostgreSQL",
+                      "--note", "regulatory reasons",
+                      "--json")
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["state"] == "IN_PROGRESS"
+        # Sub inbox alerted
+        r2 = self._run(tmp_path, "inbox", "--pane", "%128", "--json")
+        alerts = json.loads(r2.stdout)
+        assert any(a["kind"] == "reply" for a in alerts)
+        # Thread history contains the reply envelope
+        r3 = self._run(tmp_path, "thread", "--id", tid, "--json")
+        records = json.loads(r3.stdout)
+        reply_recs = [rec for rec in records if rec["kind"] == "reply"]
+        assert len(reply_recs) == 1
+        assert reply_recs[0]["body"]["answer"] == "PostgreSQL"
+        assert reply_recs[0]["body"]["note"] == "regulatory reasons"

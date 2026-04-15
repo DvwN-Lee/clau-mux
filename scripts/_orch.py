@@ -145,6 +145,8 @@ _KIND_REQUIRED = {
     "report":      ["summary", "evidence"],
     "accept":      [],
     "reject":      ["feedback"],
+    "blocked":     ["question"],
+    "reply":       ["answer"],
 }
 
 # Body fields that MUST be a list (enforced by validator). Docs promise
@@ -156,6 +158,7 @@ _LIST_FIELDS = {
                "consultations"],
     "reject": ["required_changes"],
     "delegate": ["resources", "consultations"],
+    "blocked": ["options"],
 }
 
 
@@ -444,7 +447,9 @@ class TransitionError(RuntimeError):
 
 _ALLOWED_TRANSITIONS = {
     "CREATED":     {"ack": "IN_PROGRESS"},
-    "IN_PROGRESS": {"progress": "IN_PROGRESS", "report": "REPORTED"},
+    "IN_PROGRESS": {"progress": "IN_PROGRESS", "report": "REPORTED",
+                    "blocked": "BLOCKED"},
+    "BLOCKED":     {"reply": "IN_PROGRESS"},
     "REPORTED":    {"accept": "ACCEPTED", "reject": "IN_PROGRESS"},
     "ACCEPTED":    {},   # closed via explicit close_thread()
     "CLOSED":      {},
@@ -547,7 +552,7 @@ def post_envelope(env: dict) -> None:
     tid = env["thread_id"]
     kind = env["kind"]
     # State-changing kinds (not thread_meta, which is initial marker)
-    state_changing = {"ack", "progress", "report", "accept", "reject"}
+    state_changing = {"ack", "progress", "report", "accept", "reject", "blocked", "reply"}
     # 1) Append to audit log FIRST so the envelope is durable.
     append_thread(tid, env)
     # 2) THEN advance state. If this raises (illegal transition),
@@ -653,8 +658,16 @@ def notify_pane(target_pane: str, message: str, buf_prefix: str = "orch") -> boo
     Uses `paste-buffer -p` (bracketed paste) so newlines remain literal
     and a runaway message can't inject multiple keypresses.
 
-    Returns True on success, False if tmux is unavailable.
+    [Test isolation] If env var CLMUX_ORCH_NO_NOTIFY=1, returns False
+    immediately without invoking tmux. This lets TestCLI (which spawns
+    subprocesses that would otherwise hit the operator's real tmux
+    server) run hermetically. Also useful for operators who want to
+    temporarily silence pane notifications.
+
+    Returns True on success, False if tmux is unavailable or suppressed.
     """
+    if os.environ.get("CLMUX_ORCH_NO_NOTIFY") == "1":
+        return False
     if shutil.which("tmux") is None:
         return False
     buf = f"{buf_prefix}-{os.getpid()}-{secrets.token_hex(4)}"

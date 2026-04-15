@@ -137,8 +137,30 @@ sess="${PFX}_5"
 $PIPELINE create "$sess" --headless >/dev/null
 # Wait for zsh to be ready — fixed sleeps race on loaded runners
 _wait_for_zsh "$sess" || { fail "test 5: zsh did not become ready within 3s"; }
+
+# Diagnostic (keeps running even on pass — cheap; small output)
+if [[ "${CLMUX_PIPELINE_TEST_DIAG:-0}" == "1" ]]; then
+    echo "--- test5 diag: pre-shutdown pane state ---" >&2
+    tmux list-panes -t "$sess" -F '#{pane_id} pid=#{pane_pid} cmd=#{pane_current_command} tty=#{pane_tty}' >&2 2>&1 || true
+    echo "--- test5 diag: capture-pane before C-d ---" >&2
+    tmux capture-pane -t "$sess" -p -S -30 >&2 2>&1 || true
+    echo "--- /test5 diag pre ---" >&2
+fi
+
 ec=0
 $PIPELINE shutdown "$sess" --timeout 8 || ec=$?
+
+if [[ "$ec" -ne 0 && "${CLMUX_PIPELINE_TEST_DIAG:-0}" == "1" ]]; then
+    echo "--- test5 diag: post-shutdown state (ec=$ec) ---" >&2
+    # Session was already force-killed in cmd_shutdown, so just note it
+    if tmux has-session -t "$sess" 2>/dev/null; then
+        echo "session still alive (unexpected)" >&2
+    else
+        echo "session was force-killed by cmd_shutdown (expected on timeout path)" >&2
+    fi
+    echo "--- /test5 diag post ---" >&2
+fi
+
 assert_eq "$ec" "0" "graceful shutdown of zsh session should exit 0"
 assert_session_gone "$sess"
 pass "shutdown zsh-only pane — graceful exit code 0, session gone"

@@ -132,8 +132,11 @@ cmd_create() {
     _validate_name "$name"
     _require_tmux
 
-    # Create tmux session
-    tmux new-session -d -s "$name" -c "$cwd" "exec zsh"
+    # Create tmux session.
+    # `exec zsh -i` forces interactive mode regardless of TTY detection —
+    # tmux in `-d` (detached) mode may spawn zsh non-interactively on
+    # stricter zsh builds (Ubuntu 5.8), breaking `send-keys "exit" Enter`.
+    tmux new-session -d -s "$name" -c "$cwd" "exec zsh -i"
 
     # Store creation timestamp
     tmux set-option -t "$name" @pipeline_created_at "$(date +%s)"

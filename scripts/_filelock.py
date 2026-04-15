@@ -21,6 +21,17 @@ from contextlib import contextmanager
 @contextmanager
 def file_lock(path: str, attempts: int = 200, sleep_s: float = 0.025):
     lock_dir = path + '.lock.d'
+    # Ensure the parent directory exists. Without this, os.mkdir can raise
+    # FileNotFoundError (not FileExistsError) when the team's inboxes/ dir
+    # was removed/recreated concurrently — crashing notify_shutdown.py mid
+    # pane-gone cleanup. makedirs with exist_ok=True is idempotent.
+    parent = os.path.dirname(lock_dir) or '.'
+    try:
+        os.makedirs(parent, exist_ok=True)
+    except OSError:
+        # Parent creation failed (permission, etc.). Fall through and let
+        # the mkdir attempt surface the real error.
+        pass
     acquired = False
     for _ in range(attempts):
         try:
@@ -29,6 +40,10 @@ def file_lock(path: str, attempts: int = 200, sleep_s: float = 0.025):
             break
         except FileExistsError:
             time.sleep(sleep_s)
+        except FileNotFoundError:
+            # Parent disappeared between makedirs and mkdir (race during
+            # team deletion). Nothing useful to lock; abandon.
+            break
     if not acquired:
         raise TimeoutError(f'could not acquire lock on {path}')
     try:

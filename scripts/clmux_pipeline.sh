@@ -22,8 +22,18 @@ _require_tmux() {
     fi
 }
 
-_session_exists() {
-    tmux has-session -t "$1" 2>/dev/null
+# Reject session names that tmux would interpret as target-syntax
+# (e.g. "bad:window" or "bad.pane"). Also rejects empty names.
+_validate_name() {
+    local n="$1"
+    if [[ -z "$n" ]]; then
+        echo "ERROR: session name required" >&2
+        exit 1
+    fi
+    if [[ "$n" == *:* || "$n" == *.* ]]; then
+        echo "ERROR: session name must not contain ':' or '.' (got: $n)" >&2
+        exit 1
+    fi
 }
 
 _iterm_close_by_id() {
@@ -119,8 +129,7 @@ cmd_create() {
         esac
     done
 
-    [[ -z "$name" ]] && { echo "ERROR: session name required" >&2; exit 1; }
-
+    _validate_name "$name"
     _require_tmux
 
     # Create tmux session
@@ -185,8 +194,7 @@ cmd_shutdown() {
         esac
     done
 
-    [[ -z "$name" ]] && { echo "ERROR: session name required" >&2; exit 1; }
-
+    _validate_name "$name"
     _require_tmux
 
     # Idempotent: not-found is success
@@ -391,8 +399,7 @@ cmd_info() {
         esac
     done
 
-    [[ -z "$name" ]] && { echo "ERROR: session name required" >&2; exit 1; }
-
+    _validate_name "$name"
     _require_tmux
 
     if ! tmux has-session -t "$name" 2>/dev/null; then

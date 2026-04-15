@@ -235,6 +235,32 @@ tmux kill-session -t "$unrelated_b" 2>/dev/null || true
 pass "SAFETY REGRESSION: unrelated sessions unaffected by targeted shutdown"
 
 # ---------------------------------------------------------------------------
+# Test 13: Session-name injection via tmux target syntax is rejected
+# ---------------------------------------------------------------------------
+# Names containing ':' or '.' are tmux target syntax. If accepted, -t would
+# silently retarget. We must reject them before touching tmux.
+bad_name="bad:name"
+ec=0
+$PIPELINE create "$bad_name" --headless >/dev/null 2>&1 || ec=$?
+[[ "$ec" -ne 0 ]] || { fail "create '$bad_name' should exit non-zero, got $ec"; }
+# Ensure no session was accidentally created under the colon-prefix
+if tmux has-session -t "bad" 2>/dev/null; then
+    fail "create '$bad_name' must not create a 'bad' session"
+    tmux kill-session -t "bad" 2>/dev/null || true
+fi
+
+bad_name2="bad.name"
+ec=0
+$PIPELINE create "$bad_name2" --headless >/dev/null 2>&1 || ec=$?
+[[ "$ec" -ne 0 ]] || { fail "create '$bad_name2' should exit non-zero, got $ec"; }
+
+# shutdown also rejects it (argument validation happens before tmux call)
+ec=0
+$PIPELINE shutdown "$bad_name" >/dev/null 2>&1 || ec=$?
+[[ "$ec" -ne 0 ]] || { fail "shutdown '$bad_name' should exit non-zero, got $ec"; }
+pass "session-name injection rejected (':' and '.' in name)"
+
+# ---------------------------------------------------------------------------
 # iTerm tests (only if CLMUX_PIPELINE_TEST_ITERM=1)
 # ---------------------------------------------------------------------------
 if [[ "${CLMUX_PIPELINE_TEST_ITERM:-0}" == "1" ]]; then

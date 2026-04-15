@@ -704,3 +704,104 @@ class TestResume:
         persisted = json.loads(state_file.read_text())
         assert persisted["pane_id"] == "%105"
         assert "last_resume_at" in persisted
+
+
+class TestCLI:
+    CLI = SCRIPTS / "clmux_orchestrate.py"
+
+    def _run(self, tmp_path, *args, stdin=None):
+        env = os.environ.copy()
+        env["HOME"] = str(tmp_path)
+        return subprocess.run(
+            ["python3", str(self.CLI), *args],
+            env=env, input=stdin, text=True, capture_output=True,
+        )
+
+    def test_cli_help_lists_subcommands(self, tmp_path):
+        r = self._run(tmp_path, "--help")
+        assert r.returncode == 0
+        out = r.stdout
+        for sub in ("set-master", "handover", "release-master",
+                    "register-sub", "delegate",
+                    "ack", "progress", "report", "accept", "reject", "close",
+                    "meeting", "inbox", "thread", "panes", "resume"):
+            assert sub in out
+
+    def test_cli_release_master_force_clears_stuck_lock(self, tmp_path):
+        """[H3] --force bypasses ownership check (crash recovery)."""
+        self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
+        # Caller is a different pane; without --force this would fail
+        r = self._run(tmp_path, "release-master", "--pane", "%999", "--force", "--json")
+        assert r.returncode == 0, r.stderr
+        # [H2 v3] panes.json master entry demoted after force-release
+        r2 = self._run(tmp_path, "panes", "--json")
+        data = json.loads(r2.stdout)
+        # Former master %105 either gone or role != "master"
+        assert data.get("%105", {}).get("role") != "master"
+        out = json.loads(r.stdout)
+        assert out["force"] is True
+
+    def test_cli_handover_transfers_master_role(self, tmp_path):
+        """[L-5 v3] handover CLI subcommand walks Master role to another pane."""
+        self._run(tmp_path, "set-master", "--pane", "%105", "--label", "desktop")
+        r = self._run(tmp_path, "handover",
+                      "--from", "%105", "--to", "%128",
+                      "--label", "project",
+                      "--json")
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["master"]["pane_id"] == "%128"
+        # panes.json reflects the new master; %105 is no longer master
+        r2 = self._run(tmp_path, "panes", "--json")
+        data = json.loads(r2.stdout)
+        assert data["%128"]["role"] == "master"
+        assert data.get("%105", {}).get("role") != "master"
+
+    def test_cli_set_master_and_current_master(self, tmp_path):
+        r1 = self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
+        assert r1.returncode == 0, r1.stderr
+        # panes show %105 as master
+        r2 = self._run(tmp_path, "panes", "--json")
+        data = json.loads(r2.stdout)
+        assert "%105" in data
+        assert data["%105"]["role"] == "master"
+
+    def test_cli_delegate_creates_thread(self, tmp_path):
+        self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
+        self._run(tmp_path, "register-sub", "--pane", "%128",
+                  "--master", "%105", "--label", "impl")
+        r = self._run(tmp_path, "delegate",
+                      "--from", "%105", "--to", "%128",
+                      "--scope", "do x", "--criteria", "x done",
+                      "--json")
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["thread_id"].startswith("t-")
+        # Inbox of %128 has one alert
+        r2 = self._run(tmp_path, "inbox", "--pane", "%128", "--json")
+        alerts = json.loads(r2.stdout)
+        assert len(alerts) == 1
+        assert alerts[0]["kind"] == "delegate"
+
+    def test_cli_thread_shows_history(self, tmp_path):
+        self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
+        self._run(tmp_path, "register-sub", "--pane", "%128", "--master", "%105")
+        r = self._run(tmp_path, "delegate",
+                      "--from", "%105", "--to", "%128",
+                      "--scope", "x", "--criteria", "y", "--json")
+        tid = json.loads(r.stdout)["thread_id"]
+        r2 = self._run(tmp_path, "thread", "--id", tid, "--json")
+        records = json.loads(r2.stdout)
+        kinds = [rec["kind"] for rec in records]
+        assert "thread_meta" in kinds and "delegate" in kinds
+
+    def test_cli_resume_prints_in_flight(self, tmp_path):
+        self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
+        self._run(tmp_path, "register-sub", "--pane", "%128", "--master", "%105")
+        self._run(tmp_path, "delegate",
+                  "--from", "%105", "--to", "%128",
+                  "--scope", "x", "--criteria", "y")
+        r = self._run(tmp_path, "resume", "--pane", "%105", "--json")
+        state = json.loads(r.stdout)
+        assert state["role"] == "master"
+        assert len(state["in_flight_threads"]) == 1

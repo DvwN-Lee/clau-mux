@@ -119,7 +119,7 @@ def cmd_delegate(args):
         "summary": args.scope[:80],
     })
     # Best-effort tmux notification (requires tmux)
-    _orch.notify_pane(args.to_pane, f"[orch] new delegate thread={tid} from={args.from_pane} — run: clmux-orchestrate inbox --pane {args.to_pane}")
+    _orch.notify_pane(args.to_pane, f"# orch:delegate thread={tid} from={args.from_pane} — run: clmux-orchestrate inbox --pane {args.to_pane}")
     _emit({"thread_id": tid, "envelope_id": env["id"]}, args.json)
 
 
@@ -156,7 +156,7 @@ def cmd_report(args):
         "thread_id": args.thread, "kind": "report", "from": args.from_pane,
         "summary": args.summary[:80],
     })
-    _orch.notify_pane(args.to_pane, f"[orch] report thread={args.thread} from={args.from_pane} — run: clmux-orchestrate inbox --pane {args.to_pane}")
+    _orch.notify_pane(args.to_pane, f"# orch:report thread={args.thread} from={args.from_pane} — run: clmux-orchestrate inbox --pane {args.to_pane}")
     _emit({"thread_id": args.thread, "envelope_id": env["id"],
            "state": _orch.read_thread_index()[args.thread]["state"]}, args.json)
 
@@ -167,7 +167,7 @@ def cmd_accept(args):
         kind="accept", body={"note": args.note or ""},
     )
     _orch.post_envelope(env)
-    _orch.notify_pane(args.to_pane, f"[orch] ACCEPT thread={args.thread} — run: clmux-orchestrate inbox --pane {args.to_pane}")
+    _orch.notify_pane(args.to_pane, f"# orch:accept thread={args.thread} — run: clmux-orchestrate inbox --pane {args.to_pane}")
     _emit({"thread_id": args.thread, "state": _orch.read_thread_index()[args.thread]["state"]}, args.json)
 
 
@@ -180,7 +180,7 @@ def cmd_reject(args):
         kind="reject", body=body,
     )
     _orch.post_envelope(env)
-    _orch.notify_pane(args.to_pane, f"[orch] REJECT thread={args.thread} — run: clmux-orchestrate inbox --pane {args.to_pane}")
+    _orch.notify_pane(args.to_pane, f"# orch:reject thread={args.thread} — run: clmux-orchestrate inbox --pane {args.to_pane}")
     _emit({"thread_id": args.thread, "state": _orch.read_thread_index()[args.thread]["state"]}, args.json)
 
 
@@ -199,7 +199,7 @@ def cmd_blocked(args):
         "thread_id": args.thread, "kind": "blocked", "from": args.from_pane,
         "summary": args.question[:80],
     })
-    _orch.notify_pane(args.to_pane, f"[orch] blocked thread={args.thread} from={args.from_pane} — run: clmux-orchestrate inbox --pane {args.to_pane}")
+    _orch.notify_pane(args.to_pane, f"# orch:blocked thread={args.thread} from={args.from_pane} — run: clmux-orchestrate inbox --pane {args.to_pane}")
     _emit({"thread_id": args.thread, "envelope_id": env["id"],
            "state": _orch.read_thread_index()[args.thread]["state"]}, args.json)
 
@@ -217,7 +217,7 @@ def cmd_reply(args):
         "thread_id": args.thread, "kind": "reply", "from": args.from_pane,
         "summary": args.answer[:80],
     })
-    _orch.notify_pane(args.to_pane, f"[orch] reply thread={args.thread} from={args.from_pane} — run: clmux-orchestrate inbox --pane {args.to_pane}")
+    _orch.notify_pane(args.to_pane, f"# orch:reply thread={args.thread} from={args.from_pane} — run: clmux-orchestrate inbox --pane {args.to_pane}")
     _emit({"thread_id": args.thread, "envelope_id": env["id"],
            "state": _orch.read_thread_index()[args.thread]["state"]}, args.json)
 

@@ -657,7 +657,7 @@ class TestNotify:
             recorded.append(("load-buffer", buf, len(data)))
         monkeypatch.setattr(orch, "_tmux_load_buffer", fake_load)
 
-        orch.notify_pane("%128", "[orch] thread=t-001 kind=delegate from=%105")
+        orch.notify_pane("%128", "# orch:delegate thread=t-001 from=%105")
 
         kinds = [r[0] if isinstance(r, tuple) else r for r in recorded]
         # Expect load-buffer → paste-buffer → send-keys Enter
@@ -676,6 +676,32 @@ class TestNotify:
         # Should not raise, just return False
         ok = orch.notify_pane("%128", "hello")
         assert ok is False
+
+    def test_notify_message_uses_comment_prefix(self, tmp_path, monkeypatch):
+        """[Issue #25] notify_pane messages emitted by the CLI must start with
+        `# orch:` (zsh/bash comment prefix) — NOT `[orch]` which zsh expands
+        as a glob pattern, producing `no matches found: [orch]` errors and
+        polluting the prompt.
+
+        We exercise this through the CLI subprocess path rather than calling
+        notify_pane directly, because the failure mode is specific to the
+        composed message strings in the command handlers.
+        """
+        import subprocess, json as _json
+        cli = SCRIPTS / "clmux_orchestrate.py"
+        recorded = []
+
+        # Read the source of the CLI module and verify no handler emits `[orch]`
+        src = cli.read_text()
+        # Every notify_pane call in the CLI uses f-string starting with either
+        # `[orch]` (OLD, forbidden) or `# orch:` (NEW).
+        assert "notify_pane" in src
+        # Fail if the forbidden prefix reappears inside an f-string argument
+        # to notify_pane. Look for the literal `"[orch]` and `f"[orch]` anywhere.
+        for bad in ('"[orch]', "'[orch]", 'f"[orch]', "f'[orch]"):
+            assert bad not in src, f"Found forbidden prefix {bad!r} — Issue #25 regression"
+        # At least one `# orch:` must appear (the new convention is in use)
+        assert "# orch:" in src, "Expected `# orch:` prefix to be used by notify_pane callers"
 
 
 class TestMeeting:

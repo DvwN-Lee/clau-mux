@@ -649,3 +649,18 @@ _clmux_precmd() {
 }
 autoload -Uz add-zsh-hook
 add-zsh-hook precmd _clmux_precmd
+
+# ── clmux-orchestrate ─────────────────────────────────────────────────────────
+# Thin wrapper that forwards to scripts/clmux_orchestrate.py with the
+# CLMUX_DIR root discovered at first call.
+clmux-orchestrate() {
+  if [[ -z "$CLMUX_DIR" || ! -f "$CLMUX_DIR/scripts/clmux_orchestrate.py" ]]; then
+    for _d in "$HOME/clau-mux" "$HOME/Desktop/Git/clau-mux"; do
+      [[ -f "$_d/scripts/clmux_orchestrate.py" ]] && { CLMUX_DIR="$_d"; break; }
+    done
+  fi
+  [[ -f "$CLMUX_DIR/scripts/clmux_orchestrate.py" ]] || {
+    echo "error: cannot find clau-mux directory" >&2; return 1;
+  }
+  python3 "$CLMUX_DIR/scripts/clmux_orchestrate.py" "$@"
+}

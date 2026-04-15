@@ -11,6 +11,9 @@ tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
 export HOME="$tmpdir"
+# [test isolation] suppress notify_pane so subprocess CLI calls don't paste
+# into the operator's real tmux panes (e.g. %105/%128 if they happen to exist).
+export CLMUX_ORCH_NO_NOTIFY=1
 CLI="python3 $CLMUX_DIR/scripts/clmux_orchestrate.py"
 
 # Step 1: master claim

@@ -820,7 +820,8 @@ class TestCLI:
         out = r.stdout
         for sub in ("set-master", "handover", "release-master",
                     "register-sub", "delegate",
-                    "ack", "progress", "report", "accept", "reject", "close",
+                    "ack", "progress", "report", "accept", "reject",
+                    "blocked", "reply", "close",
                     "meeting", "inbox", "thread", "panes", "resume"):
             assert sub in out
 
@@ -902,3 +903,71 @@ class TestCLI:
         state = json.loads(r.stdout)
         assert state["role"] == "master"
         assert len(state["in_flight_threads"]) == 1
+
+    def test_cli_blocked_command(self, tmp_path):
+        """Sub posts a blocked envelope; thread state becomes BLOCKED, inbox alert exists."""
+        self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
+        self._run(tmp_path, "register-sub", "--pane", "%128", "--master", "%105")
+        r = self._run(tmp_path, "delegate",
+                      "--from", "%105", "--to", "%128",
+                      "--scope", "x", "--criteria", "y", "--json")
+        tid = json.loads(r.stdout)["thread_id"]
+        self._run(tmp_path, "ack",
+                  "--thread", tid, "--from", "%128", "--to", "%105")
+        # Now IN_PROGRESS; post blocked
+        r = self._run(tmp_path, "blocked",
+                      "--thread", tid, "--from", "%128", "--to", "%105",
+                      "--question", "PostgreSQL or MySQL?",
+                      "--options", "pg", "--options", "mysql",
+                      "--urgency", "normal",
+                      "--json")
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["thread_id"] == tid
+        assert out["state"] == "BLOCKED"
+        # Master inbox has a blocked alert
+        r2 = self._run(tmp_path, "inbox", "--pane", "%105", "--json")
+        alerts = json.loads(r2.stdout)
+        assert any(a["kind"] == "blocked" for a in alerts)
+        # Thread history contains the blocked envelope with options list + urgency
+        r3 = self._run(tmp_path, "thread", "--id", tid, "--json")
+        records = json.loads(r3.stdout)
+        blocked_recs = [rec for rec in records if rec["kind"] == "blocked"]
+        assert len(blocked_recs) == 1
+        assert blocked_recs[0]["body"]["question"] == "PostgreSQL or MySQL?"
+        assert blocked_recs[0]["body"]["options"] == ["pg", "mysql"]
+        assert blocked_recs[0]["body"]["urgency"] == "normal"
+
+    def test_cli_reply_command(self, tmp_path):
+        """Master replies; thread returns to IN_PROGRESS; sub inbox notified."""
+        self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
+        self._run(tmp_path, "register-sub", "--pane", "%128", "--master", "%105")
+        r = self._run(tmp_path, "delegate",
+                      "--from", "%105", "--to", "%128",
+                      "--scope", "x", "--criteria", "y", "--json")
+        tid = json.loads(r.stdout)["thread_id"]
+        self._run(tmp_path, "ack",
+                  "--thread", tid, "--from", "%128", "--to", "%105")
+        self._run(tmp_path, "blocked",
+                  "--thread", tid, "--from", "%128", "--to", "%105",
+                  "--question", "x?")
+        # Now BLOCKED; post reply
+        r = self._run(tmp_path, "reply",
+                      "--thread", tid, "--from", "%105", "--to", "%128",
+                      "--answer", "PostgreSQL",
+                      "--note", "regulatory reasons",
+                      "--json")
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["state"] == "IN_PROGRESS"
+        # Sub inbox alerted
+        r2 = self._run(tmp_path, "inbox", "--pane", "%128", "--json")
+        alerts = json.loads(r2.stdout)
+        assert any(a["kind"] == "reply" for a in alerts)
+        # Thread history contains the reply envelope
+        r3 = self._run(tmp_path, "thread", "--id", tid, "--json")
+        records = json.loads(r3.stdout)
+        reply_recs = [rec for rec in records if rec["kind"] == "reply"]
+        assert len(reply_recs) == 1
+        assert reply_recs[0]["body"]["answer"] == "PostgreSQL"
+        assert reply_recs[0]["body"]["note"] == "regulatory reasons"

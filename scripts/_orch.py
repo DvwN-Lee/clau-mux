@@ -552,7 +552,7 @@ def post_envelope(env: dict) -> None:
     tid = env["thread_id"]
     kind = env["kind"]
     # State-changing kinds (not thread_meta, which is initial marker)
-    state_changing = {"ack", "progress", "report", "accept", "reject"}
+    state_changing = {"ack", "progress", "report", "accept", "reject", "blocked", "reply"}
     # 1) Append to audit log FIRST so the envelope is durable.
     append_thread(tid, env)
     # 2) THEN advance state. If this raises (illegal transition),

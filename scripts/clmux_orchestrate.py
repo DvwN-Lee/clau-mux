@@ -12,6 +12,8 @@ Subcommands:
   report           — sub delivers final result with evidence
   accept           — master accepts a sub's report
   reject           — master rejects with feedback
+  blocked          — sub posts a clarification question to master
+  reply            — master posts an answer to sub
   close            — master closes an accepted thread
   meeting          — subcommands: start, end
   inbox            — show/mark-read pending alerts for a pane
@@ -182,6 +184,44 @@ def cmd_reject(args):
     _emit({"thread_id": args.thread, "state": _orch.read_thread_index()[args.thread]["state"]}, args.json)
 
 
+def cmd_blocked(args):
+    body = {"question": args.question}
+    if args.options:
+        body["options"] = args.options
+    if args.urgency:
+        body["urgency"] = args.urgency
+    env = _orch.make_envelope(
+        thread_id=args.thread, from_=args.from_pane, to=args.to_pane,
+        kind="blocked", body=body,
+    )
+    _orch.post_envelope(env)
+    _orch.add_inbox_alert(args.to_pane, {
+        "thread_id": args.thread, "kind": "blocked", "from": args.from_pane,
+        "summary": args.question[:80],
+    })
+    _orch.notify_pane(args.to_pane, f"[orch] blocked thread={args.thread} from={args.from_pane} — run: clmux-orchestrate inbox --pane {args.to_pane}")
+    _emit({"thread_id": args.thread, "envelope_id": env["id"],
+           "state": _orch.read_thread_index()[args.thread]["state"]}, args.json)
+
+
+def cmd_reply(args):
+    body = {"answer": args.answer}
+    if args.note:
+        body["note"] = args.note
+    env = _orch.make_envelope(
+        thread_id=args.thread, from_=args.from_pane, to=args.to_pane,
+        kind="reply", body=body,
+    )
+    _orch.post_envelope(env)
+    _orch.add_inbox_alert(args.to_pane, {
+        "thread_id": args.thread, "kind": "reply", "from": args.from_pane,
+        "summary": args.answer[:80],
+    })
+    _orch.notify_pane(args.to_pane, f"[orch] reply thread={args.thread} from={args.from_pane} — run: clmux-orchestrate inbox --pane {args.to_pane}")
+    _emit({"thread_id": args.thread, "envelope_id": env["id"],
+           "state": _orch.read_thread_index()[args.thread]["state"]}, args.json)
+
+
 def cmd_close(args):
     _orch.close_thread(args.thread, note=args.note or "")
     _emit({"thread_id": args.thread, "state": "CLOSED"}, args.json)
@@ -290,6 +330,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--feedback", required=True)
     sp.add_argument("--required-changes", dest="required_changes", action="append")
     sp.set_defaults(func=cmd_reject)
+
+    sp = sub.add_parser("blocked", parents=[common])
+    sp.add_argument("--thread", required=True)
+    sp.add_argument("--from", dest="from_pane", required=True)
+    sp.add_argument("--to", dest="to_pane", required=True)
+    sp.add_argument("--question", required=True)
+    sp.add_argument("--options", action="append", help="repeatable option string")
+    sp.add_argument("--urgency")
+    sp.set_defaults(func=cmd_blocked)
+
+    sp = sub.add_parser("reply", parents=[common])
+    sp.add_argument("--thread", required=True)
+    sp.add_argument("--from", dest="from_pane", required=True)
+    sp.add_argument("--to", dest="to_pane", required=True)
+    sp.add_argument("--answer", required=True)
+    sp.add_argument("--note")
+    sp.set_defaults(func=cmd_reply)
 
     sp = sub.add_parser("close", parents=[common]); sp.add_argument("--thread", required=True); sp.add_argument("--note"); sp.set_defaults(func=cmd_close)
 

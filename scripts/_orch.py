@@ -658,8 +658,16 @@ def notify_pane(target_pane: str, message: str, buf_prefix: str = "orch") -> boo
     Uses `paste-buffer -p` (bracketed paste) so newlines remain literal
     and a runaway message can't inject multiple keypresses.
 
-    Returns True on success, False if tmux is unavailable.
+    [Test isolation] If env var CLMUX_ORCH_NO_NOTIFY=1, returns False
+    immediately without invoking tmux. This lets TestCLI (which spawns
+    subprocesses that would otherwise hit the operator's real tmux
+    server) run hermetically. Also useful for operators who want to
+    temporarily silence pane notifications.
+
+    Returns True on success, False if tmux is unavailable or suppressed.
     """
+    if os.environ.get("CLMUX_ORCH_NO_NOTIFY") == "1":
+        return False
     if shutil.which("tmux") is None:
         return False
     buf = f"{buf_prefix}-{os.getpid()}-{secrets.token_hex(4)}"

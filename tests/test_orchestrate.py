@@ -703,6 +703,24 @@ class TestNotify:
         # At least one `# orch:` must appear (the new convention is in use)
         assert "# orch:" in src, "Expected `# orch:` prefix to be used by notify_pane callers"
 
+    def test_notify_pane_respects_no_notify_env(self, tmp_path, monkeypatch):
+        """Setting CLMUX_ORCH_NO_NOTIFY=1 causes notify_pane to return False
+        without invoking tmux — required for TestCLI subprocess isolation.
+        """
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        # Even with tmux available, the env var suppresses notification.
+        monkeypatch.setattr(orch.shutil, "which", lambda cmd: "/usr/bin/tmux")
+        monkeypatch.setenv("CLMUX_ORCH_NO_NOTIFY", "1")
+        calls = []
+        monkeypatch.setattr(orch.subprocess, "run",
+                            lambda *a, **kw: calls.append(a) or type("R", (), {"returncode": 0})())
+        monkeypatch.setattr(orch, "_tmux_load_buffer",
+                            lambda buf, data: calls.append(("load-buffer", buf)))
+        ok = orch.notify_pane("%105", "should not be sent")
+        assert ok is False
+        assert calls == []  # no tmux invocation
+
 
 class TestMeeting:
     def test_start_meeting_creates_lock_and_returns_id(self, tmp_path, monkeypatch):
@@ -835,6 +853,9 @@ class TestCLI:
     def _run(self, tmp_path, *args, stdin=None):
         env = os.environ.copy()
         env["HOME"] = str(tmp_path)
+        env["CLMUX_ORCH_NO_NOTIFY"] = "1"  # prevent subprocess notify_pane
+                                            # from pasting into the operator's
+                                            # real tmux session (test isolation)
         return subprocess.run(
             ["python3", str(self.CLI), *args],
             env=env, input=stdin, text=True, capture_output=True,

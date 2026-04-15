@@ -128,3 +128,76 @@ def read_thread(thread_id: str) -> list:
             # Skip corrupt lines rather than failing — audit preserves rest
             continue
     return out
+
+
+# ─── envelope ───────────────────────────────────────────────────────────────
+
+class EnvelopeError(ValueError):
+    """Raised when an envelope fails schema validation."""
+
+
+# Required body fields per envelope kind. Empty list = no required fields.
+_KIND_REQUIRED = {
+    "thread_meta": ["parent_thread_id", "delegator", "root"],
+    "delegate":    ["scope", "success_criteria"],
+    "ack":         [],
+    "progress":    ["status"],
+    "report":      ["summary", "evidence"],
+    "accept":      [],
+    "reject":      ["feedback"],
+}
+
+# Body fields that MUST be a list (enforced by validator). Docs promise
+# array semantics for these; without type enforcement, the CLI can emit
+# a string where list is expected and downstream consumers break.
+# [M3 amendment per 2026-04-15 cross-review]
+_LIST_FIELDS = {
+    "report": ["evidence", "decisions_made", "open_questions", "risks",
+               "consultations"],
+    "reject": ["required_changes"],
+    "delegate": ["resources", "consultations"],
+}
+
+
+def make_envelope(thread_id: str, from_: str, to: str, kind: str,
+                  body: dict, parent_id=None) -> dict:
+    """Construct an envelope dict with auto-generated id and ts."""
+    return {
+        "id": _rand_id("e"),
+        "thread_id": thread_id,
+        "ts": _now_ts(),
+        "from": from_,
+        "to": to,
+        "kind": kind,
+        "parent_id": parent_id,
+        "body": body or {},
+    }
+
+
+def validate_envelope(env: dict) -> None:
+    """Raise EnvelopeError if envelope violates schema."""
+    # parent_id is optional so not required here, but make_envelope always
+    # emits it (default None). validator does not treat its absence as fatal.
+    for top in ("id", "thread_id", "ts", "from", "to", "kind", "body"):
+        if top not in env:
+            raise EnvelopeError(f"missing top-level field: {top}")
+    kind = env["kind"]
+    if kind not in _KIND_REQUIRED:
+        raise EnvelopeError(f"unknown kind: {kind}")
+    body = env["body"]
+    if not isinstance(body, dict):
+        raise EnvelopeError(f"body must be object, got {type(body).__name__}")
+    for req in _KIND_REQUIRED[kind]:
+        if req not in body:
+            raise EnvelopeError(f"{kind} body missing required field: {req}")
+    # [M3] Enforce list types on documented array fields so the CLI cannot
+    # emit structurally invalid envelopes that pass key-presence checks
+    # but break downstream consumers expecting a list.
+    for fname in _LIST_FIELDS.get(kind, []):
+        if fname in body and not isinstance(body[fname], list):
+            raise EnvelopeError(
+                f"{kind} body field '{fname}' must be list, got {type(body[fname]).__name__}"
+            )
+    # reject.allow_rescope defaults true if absent; normalize
+    if kind == "reject" and "allow_rescope" not in body:
+        body["allow_rescope"] = True

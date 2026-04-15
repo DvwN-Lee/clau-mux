@@ -11,7 +11,19 @@ outbox_path = os.path.join(os.path.dirname(inbox_path), 'team-lead.json')
 # Hold the lock across read-modify-write to prevent lost updates when
 # bridge-mcp-server.js writeToLeadImpl runs concurrently for another
 # teammate (both write the same team-lead.json outbox).
-with file_lock(outbox_path):
+#
+# notify_shutdown runs on the pane-gone path during cleanup, and its
+# directory may have been removed concurrently (e.g. TeamDelete). Treat
+# any lock-acquisition failure as "no lead to notify" and exit cleanly
+# so the bridge cleanup trap still completes its other duties.
+try:
+    _lock_cm = file_lock(outbox_path)
+    _lock_cm.__enter__()
+except (TimeoutError, FileNotFoundError, PermissionError) as e:
+    print(f"notify_shutdown: cannot lock {outbox_path}: {e}", file=sys.stderr)
+    sys.exit(0)
+
+try:
     try:
         with open(outbox_path) as f:
             msgs = json.load(f)
@@ -44,8 +56,14 @@ with file_lock(outbox_path):
         else:
             msgs.pop(0)
     dir_ = os.path.dirname(os.path.abspath(outbox_path))
-    with sigterm_guard():
-        with tempfile.NamedTemporaryFile(mode='w', dir=dir_, delete=False, suffix='.tmp') as tf:
-            json.dump(msgs, tf, indent=2, ensure_ascii=False)
-            tmp_name = tf.name
-        os.replace(tmp_name, outbox_path)
+    try:
+        with sigterm_guard():
+            with tempfile.NamedTemporaryFile(mode='w', dir=dir_, delete=False, suffix='.tmp') as tf:
+                json.dump(msgs, tf, indent=2, ensure_ascii=False)
+                tmp_name = tf.name
+            os.replace(tmp_name, outbox_path)
+    except FileNotFoundError as e:
+        # Team dir vanished after we acquired the lock. Nothing to write.
+        print(f"notify_shutdown: outbox dir gone, skipping: {e}", file=sys.stderr)
+finally:
+    _lock_cm.__exit__(None, None, None)

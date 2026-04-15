@@ -64,19 +64,34 @@ This is an atomic swap: `%105` loses Master role, `%128` gains it, and the lock 
 └── state/<pane>.json        # resume snapshot
 ```
 
-## Envelope kinds (Phase 1)
+## Envelope kinds
 
-| kind | direction | required body |
-|---|---|---|
-| `thread_meta` | — | parent_thread_id, delegator, root |
-| `delegate` | Master → Sub | scope, success_criteria |
-| `ack` | Sub → Master | — |
-| `progress` | Sub → Master | status |
-| `report` | Sub → Master | summary, evidence[] |
-| `accept` | Master → Sub | — |
-| `reject` | Master → Sub | feedback |
+| kind | direction | required body | optional body |
+|---|---|---|---|
+| `thread_meta` | — | parent_thread_id, delegator, root | — |
+| `delegate` | Master → Sub | scope, success_criteria | non_goals, deliverable, urgency, resources[], consultations[] |
+| `ack` | Sub → Master | — | note |
+| `progress` | Sub → Master | status | note |
+| `report` | Sub → Master | summary, evidence[] | decisions_made[], open_questions[], risks[], consultations[] |
+| `accept` | Master → Sub | — | note |
+| `reject` | Master → Sub | feedback | required_changes[] |
+| `blocked` | Sub → Master | question | options[], urgency |
+| `reply` | Master → Sub | answer | note, unblock_to |
 
-Phase 2 additions (not implemented yet): `blocked`, `reply`, `progress_heartbeat`.
+Phase 2 additions (not yet implemented): `progress_heartbeat`.
+
+## State machine
+
+```
+CREATED ──ack──> IN_PROGRESS ──progress──> IN_PROGRESS
+                      │ ├──report──> REPORTED ──accept──> ACCEPTED ──close──> CLOSED
+                      │ │                  └─reject──> IN_PROGRESS
+                      │ └──blocked──> BLOCKED ──reply──> IN_PROGRESS
+                      │
+                      └── ACCEPTED and CLOSED are terminal for this thread.
+```
+
+Illegal transitions raise `TransitionError`. The envelope is appended to the audit log *before* the transition attempt (H1 ordering), so forensics can inspect rejected transitions.
 
 ## Workflow
 
@@ -126,6 +141,25 @@ Phase 2 additions (not implemented yet): `blocked`, `reply`, `progress_heartbeat
    clmux-orchestrate close --thread $tid --note "user approved"
    ```
 
+### Optional: Sub asks for clarification (`blocked` / `reply`)
+
+If Sub needs a decision from Master before it can continue, it posts a `blocked` envelope. Thread state moves `IN_PROGRESS → BLOCKED` and Master gets an inbox alert. When Master answers with `reply`, state returns `BLOCKED → IN_PROGRESS`.
+
+```bash
+# Sub hit a fork in the road:
+clmux-orchestrate blocked --thread $tid --from %128 --to %105 \
+      --question "PostgreSQL vs MySQL?" \
+      --options pg --options mysql \
+      --urgency normal
+
+# Master decides:
+clmux-orchestrate reply --thread $tid --from %105 --to %128 \
+      --answer "PostgreSQL" \
+      --note "regulatory reasons"
+```
+
+Only legal from `IN_PROGRESS`; attempting to `blocked` from CREATED or `reply` from a non-BLOCKED state raises `TransitionError`. Audit: the blocked / reply envelopes appear in `threads/<tid>.jsonl` alongside delegate / ack / progress / report.
+
 ## Resume
 
 If a pane dies, anyone can recover its in-flight state:
@@ -171,7 +205,6 @@ If stronger guarantees are needed in Phase 2, options include: (1) signed conten
 
 ## Known limitations
 
-- **No `blocked` / `reply` state yet.** If Sub needs clarification, use informal channel for now. Phase 2 will add `blocked` + `reply` with state-machine transitions.
 - **No automatic meeting audit CLI.** The archive is persistent and readable, but there's no `clmux-orchestrate meetings list/show` yet. Inspect with `ls ~/.claude/orchestration/meetings/` and `cat <id>/synthesis.md`.
 - **No cascade cancel.** A rejected parent thread does NOT auto-cancel child threads; Sub should handle that manually if needed.
 - **Master stale detection is manual.** If a Master pane dies without releasing, another pane can't automatically take over. Recovery path: `clmux-orchestrate release-master --pane <dead> --force` (a crash-recovery flag added in Phase 1 v2 for exactly this case).

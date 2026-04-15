@@ -9,8 +9,11 @@
 # Exit 1: at least one test failed
 set -euo pipefail
 
-# Ensure tmux server is running (CI images have no active server initially).
-tmux start-server 2>/dev/null || true
+# Ensure tmux server is running with at least one session (CI images have no
+# active server; exit-empty default kills a bare-start server immediately).
+if ! tmux has-session 2>/dev/null; then
+    tmux new-session -d -s _pipeline_test_keepalive "sleep 3600"
+fi
 
 CLMUX_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PIPELINE="bash $CLMUX_DIR/scripts/clmux_pipeline.sh"
@@ -23,6 +26,7 @@ _cleanup() {
         | grep "^testpipe_$$" \
         | while IFS= read -r _s; do tmux kill-session -t "$_s" 2>/dev/null || true; done \
         || true
+    tmux kill-session -t _pipeline_test_keepalive 2>/dev/null || true
 }
 trap '_cleanup' EXIT
 

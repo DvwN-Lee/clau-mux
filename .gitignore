@@ -4,7 +4,8 @@ ANALYSIS.md
 .gemini-mcp/
 docs/*-retrospective.md
 .worktrees/
-scripts/__pycache__/
+**/__pycache__/
+**/.pytest_cache/
 /GEMINI.md
 /AGENTS.md
 /COPILOT.md

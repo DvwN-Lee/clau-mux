@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0 — 2026-04-15
+
+### Added
+- **Pane orchestration protocol (Phase 1 MVP)** — hierarchical Master/Sub delegation across Claude Code panes, with thread-level audit (JSONL), meeting 1-off with WORM archive, and resume-across-sessions. CLI: `clmux-orchestrate` (set-master, handover, register-sub, delegate, ack, progress, report, accept, reject, close, meeting {start,end,release}, inbox, thread, panes, resume). See `docs/orchestration.md`.
+- **Corporate Hierarchy Pattern** documented for Desktop → Project → Worktree org layouts; use `--label` to identify which worktree each Sub serves.
+- **Crash-recovery flags** — `release-master --force` and `meeting release --force` for clearing stuck locks after pane death.
+
+### Tests
+- `tests/test_orchestrate.py` — 65 unit tests across storage, envelope, lock, panes, thread, inbox, notify, meeting, resume, CLI.
+- `tests/test_orchestrate_integration.sh` — end-to-end shell test covering full delegate→ack→report→accept→close cycle plus meeting archive.
+
+### Known limitations (Phase 2 candidates)
+See `docs/orchestration.md` "Known limitations". No `blocked`/`reply` state yet, no cascade cancel, no cross-machine coordination, advisory-only WORM semantics.
+
 ## [Unreleased]
 
 ### Fixed

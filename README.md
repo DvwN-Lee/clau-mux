@@ -54,6 +54,7 @@ flowchart LR
 - **Copilot Teammate**: GitHub Copilot CLI를 Claude Code teammate로 연결 (MCP bridge / HTTP)
 - **tmux 테마**: 커스텀 상태바, 마우스 토글, copy mode
 - **플러그인 자동 로드**: `CLMUX_PLUGIN_DIR` 환경변수 설정 시, 해당 디렉토리의 유효한 플러그인을 자동으로 `--plugin-dir` 인자로 전달
+- **Pane Orchestration** (Phase 1) — hierarchical Master/Sub delegation protocol with thread-level audit, meeting archive, and resume. See [`docs/orchestration.md`](docs/orchestration.md).
 
 ## 설치
 

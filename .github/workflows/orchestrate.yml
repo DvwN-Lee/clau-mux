@@ -5,14 +5,18 @@ on:
     paths:
       - 'scripts/_orch.py'
       - 'scripts/clmux_orchestrate.py'
+      - 'scripts/clmux_pipeline.py'
       - 'tests/test_orchestrate*'
+      - 'tests/test_clmux_pipeline*'
       - '.github/workflows/orchestrate.yml'
   push:
     branches: [main]
     paths:
       - 'scripts/_orch.py'
       - 'scripts/clmux_orchestrate.py'
+      - 'scripts/clmux_pipeline.py'
       - 'tests/test_orchestrate*'
+      - 'tests/test_clmux_pipeline*'
 
 jobs:
   test:
@@ -31,3 +35,6 @@ jobs:
       - name: Integration test
         run: bash tests/test_orchestrate_integration.sh
         timeout-minutes: 2
+      - name: Pipeline tests
+        run: bash tests/test_clmux_pipeline.sh
+        timeout-minutes: 3

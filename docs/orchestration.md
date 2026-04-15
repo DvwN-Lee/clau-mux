@@ -164,6 +164,18 @@ clmux-orchestrate reply --thread $tid --from %105 --to %128 \
 
 Only legal from `IN_PROGRESS`; attempting to `blocked` from CREATED or `reply` from a non-BLOCKED state raises `TransitionError`. Audit: the blocked / reply envelopes appear in `threads/<tid>.jsonl` alongside delegate / ack / progress / report.
 
+## Runtime silencing
+
+Set `CLMUX_ORCH_NO_NOTIFY=1` to suppress all `notify_pane` paste output. Useful for:
+
+- **Headless / demo recording** — no paste-buffer side effects while screencasting.
+- **Operator silencing** — transiently mute pane notifications without tearing down the orchestration state.
+- **Automated scripts** — when a driver script issues many `delegate` / `report` / `reply` calls in a loop, pasting a `# orch:` comment into every pane becomes noise.
+
+This flag only affects the **paste notification**. Inbox JSONL records and thread state transitions proceed normally; nothing is lost. `clmux-orchestrate inbox --pane <pane>` still returns the pending alerts, so operators can pull them on demand.
+
+Implementation note: `notify_pane()` short-circuits before invoking `tmux paste-buffer` when this env var is set. The test harness (`TestCLI._run`) sets it unconditionally so unit tests never touch the operator's live panes.
+
 ## Resume
 
 If a pane dies, anyone can recover its in-flight state:

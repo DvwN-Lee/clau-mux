@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.1 — 2026-04-15
+
+### Added
+- **Pane orchestration Phase 2 #1 — `blocked` / `reply` state machine.** Sub can now formally pause for clarification instead of relying on an out-of-band channel. New envelope kinds `blocked` (Sub→Master, body: `question`, optional `options[]` + `urgency`) and `reply` (Master→Sub, body: `answer`, optional `note`). New state transitions: `IN_PROGRESS --blocked--> BLOCKED` and `BLOCKED --reply--> IN_PROGRESS`. CLI: `clmux-orchestrate blocked` + `clmux-orchestrate reply`. See `docs/orchestration.md` "State machine" + "Sub asks for clarification" sections.
+
+### Fixed
+- **Issue #25: `notify_pane` prefix → `# orch:` (was `[orch]`).** The `[orch]` prefix was glob-expanded by zsh on the receiving pane, producing `no matches found: [orch]` errors and prompt pollution. Switched to `# orch:<kind> ...` — a shell comment prefix — so the paste is discarded silently regardless of shell.
+- **Test isolation** — `TestCLI` subprocesses no longer invoke real `tmux paste-buffer` against the operator's live panes. `notify_pane()` now short-circuits when `CLMUX_ORCH_NO_NOTIFY=1`; `TestCLI._run` sets this env var in every subprocess. Operators can also use this flag to silence notifications transiently.
+
+### Tests
+- 78 unit tests (was 65; +4 BLOCKED transitions, +5 blocked/reply envelope validation, +2 CLI blocked/reply, +1 notify prefix guard, +1 notify isolation env var).
+
 ## 1.3.0 — 2026-04-15
 
 ### Added

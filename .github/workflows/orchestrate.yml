@@ -24,6 +24,8 @@ jobs:
           python-version: '3.11'
       - name: Install tmux (for integration test)
         run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install pytest
+        run: python3 -m pip install --upgrade pip pytest
       - name: Unit tests
         run: python3 -m pytest tests/test_orchestrate.py -v
       - name: Integration test

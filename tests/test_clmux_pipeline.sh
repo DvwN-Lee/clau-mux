@@ -184,7 +184,10 @@ sess_c="${PFX}_9c"  # untagged
 $PIPELINE create "$sess_a" --headless --tag "orch-test" >/dev/null
 $PIPELINE create "$sess_b" --headless --tag "orch-test" >/dev/null
 $PIPELINE create "$sess_c" --headless >/dev/null
-sleep 0.3
+# Both tagged sessions must have zsh ready for graceful shutdown;
+# sess_c (untagged) is never shut down so no wait needed.
+_wait_for_zsh "$sess_a" || { fail "test 9: zsh not ready in $sess_a"; }
+_wait_for_zsh "$sess_b" || { fail "test 9: zsh not ready in $sess_b"; }
 ec=0
 $PIPELINE shutdown-tagged "orch-test" --timeout 8 || ec=$?
 [[ "$ec" -eq 0 ]] || { fail "shutdown-tagged exit code should be 0, got $ec"; }
@@ -241,7 +244,8 @@ tmux new-session -d -s "$unrelated_b" "exec zsh"
 
 # Create pipeline session to shut down
 $PIPELINE create "$pipeline_target" --headless --tag "safety-test" >/dev/null
-sleep 0.3
+# Only the target needs zsh ready; unrelated_a/b are never shut down here.
+_wait_for_zsh "$pipeline_target" || { fail "test 12: zsh not ready in $pipeline_target"; }
 
 # Shut down ONLY the pipeline session
 $PIPELINE shutdown "$pipeline_target" --timeout 5 || true

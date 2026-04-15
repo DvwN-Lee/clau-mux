@@ -1,0 +1,31 @@
+name: orchestrate
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/_orch.py'
+      - 'scripts/clmux_orchestrate.py'
+      - 'tests/test_orchestrate*'
+      - '.github/workflows/orchestrate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/_orch.py'
+      - 'scripts/clmux_orchestrate.py'
+      - 'tests/test_orchestrate*'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install tmux (for integration test)
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Unit tests
+        run: python3 -m pytest tests/test_orchestrate.py -v
+      - name: Integration test
+        run: bash tests/test_orchestrate_integration.sh
+        timeout-minutes: 2

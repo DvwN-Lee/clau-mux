@@ -492,6 +492,59 @@ class TestThread:
         # Index state unchanged (still CREATED)
         assert orch.read_thread_index()[tid]["state"] == "CREATED"
 
+    def test_transition_blocked_from_in_progress(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%105", to="%128", kind="delegate",
+            body={"scope": "x", "success_criteria": "y"},
+        ))
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%128", to="%105", kind="ack", body={},
+        ))
+        assert orch.read_thread_index()[tid]["state"] == "IN_PROGRESS"
+        orch._apply_transition(tid, "blocked")
+        assert orch.read_thread_index()[tid]["state"] == "BLOCKED"
+
+    def test_transition_reply_returns_to_in_progress(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%105", to="%128", kind="delegate",
+            body={"scope": "x", "success_criteria": "y"},
+        ))
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%128", to="%105", kind="ack", body={},
+        ))
+        orch._apply_transition(tid, "blocked")
+        assert orch.read_thread_index()[tid]["state"] == "BLOCKED"
+        orch._apply_transition(tid, "reply")
+        assert orch.read_thread_index()[tid]["state"] == "IN_PROGRESS"
+
+    def test_blocked_from_created_raises(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        with pytest.raises(orch.TransitionError):
+            orch._apply_transition(tid, "blocked")
+
+    def test_reply_from_in_progress_raises(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%105", to="%128", kind="delegate",
+            body={"scope": "x", "success_criteria": "y"},
+        ))
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%128", to="%105", kind="ack", body={},
+        ))
+        assert orch.read_thread_index()[tid]["state"] == "IN_PROGRESS"
+        with pytest.raises(orch.TransitionError):
+            orch._apply_transition(tid, "reply")
+
 
 class TestInbox:
     def test_add_inbox_alert_creates_jsonl(self, tmp_path, monkeypatch):

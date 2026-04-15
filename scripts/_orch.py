@@ -444,7 +444,9 @@ class TransitionError(RuntimeError):
 
 _ALLOWED_TRANSITIONS = {
     "CREATED":     {"ack": "IN_PROGRESS"},
-    "IN_PROGRESS": {"progress": "IN_PROGRESS", "report": "REPORTED"},
+    "IN_PROGRESS": {"progress": "IN_PROGRESS", "report": "REPORTED",
+                    "blocked": "BLOCKED"},
+    "BLOCKED":     {"reply": "IN_PROGRESS"},
     "REPORTED":    {"accept": "ACCEPTED", "reject": "IN_PROGRESS"},
     "ACCEPTED":    {},   # closed via explicit close_thread()
     "CLOSED":      {},

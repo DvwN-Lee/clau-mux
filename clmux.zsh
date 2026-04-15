@@ -360,16 +360,23 @@ _clmux_spawn_agent() {
 
   local lead_pane="${TMUX_PANE}"
 
+  # Pre-trust the lead pane's cwd (= cwd the new pane will inherit via
+  # tmux split-window) in the CLI's trust store. All three CLIs show an
+  # interactive "Do you trust this folder?" prompt on first launch in an
+  # unknown directory; that prompt blocks idle detection and, for codex,
+  # its `› 1. Yes, continue` option line also falsely matches the bridge
+  # idle pattern and crashes the pane on first paste.
+  local _lead_cwd
+  _lead_cwd=$(tmux display-message -t "$lead_pane" -p '#{pane_current_path}' 2>/dev/null)
+
   # Codex: update config.toml BEFORE pane spawn (env_clear() strips PATH/HOME)
   if [[ "${cli_cmd%% *}" == "codex" ]]; then
     python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" --outbox "$outbox" --agent "$agent_name" &>/dev/null
-    # Pre-trust the lead pane's cwd (= cwd the new codex pane will inherit)
-    # so codex skips the "Do you trust this directory?" prompt. Without this,
-    # the trust prompt's `› 1. Yes, continue` option falsely matches the
-    # bridge's idle pattern and the first paste crashes the codex pane.
-    local _lead_cwd
-    _lead_cwd=$(tmux display-message -t "$lead_pane" -p '#{pane_current_path}' 2>/dev/null)
     [[ -n "$_lead_cwd" ]] && python3 "$CLMUX_DIR/scripts/trust_codex_project.py" "$_lead_cwd" 2>/dev/null
+  elif [[ "${cli_cmd%% *}" == "gemini" ]]; then
+    [[ -n "$_lead_cwd" ]] && python3 "$CLMUX_DIR/scripts/trust_gemini_project.py" "$_lead_cwd" 2>/dev/null
+  elif [[ "${cli_cmd%% *}" == "copilot" ]]; then
+    [[ -n "$_lead_cwd" ]] && python3 "$CLMUX_DIR/scripts/trust_copilot_project.py" "$_lead_cwd" 2>/dev/null
   fi
 
   local pane_count

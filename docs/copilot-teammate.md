@@ -44,7 +44,8 @@ Copilot은 프로젝트 루트의 `COPILOT.md` 파일을 자동으로 읽어 지
 clmux-copilot -t <team_name>
 
 # 메시지 전송 (Claude Code 내부에서)
-SendMessage(to: "copilot-worker", message: "...")
+# 에이전트 이름은 <team_name>-copilot-worker 형식을 사용합니다.
+SendMessage(to: "<team_name>-copilot-worker", message: "...")
 
 # Copilot teammate 종료
 clmux-copilot-stop -t <team_name>
@@ -55,7 +56,7 @@ clmux-copilot-stop -t <team_name>
 | 옵션 | 설명 |
 |------|------|
 | `-t <team_name>` | 팀 이름 (필수) |
-| `-n <agent_name>` | 에이전트 이름 (기본: copilot-worker) |
+| `-n <agent_name>` | 에이전트 이름 (기본: <team_name>-copilot-worker) |
 | `-x <timeout>` | idle 대기 타임아웃 초 (기본: 30) |
 
 ## idle 패턴

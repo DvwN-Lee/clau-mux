@@ -2,8 +2,11 @@ import json, sys, time, tempfile, os
 team_dir, agent_name, pane_id, cli_cmd = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 task_capable = len(sys.argv) > 5 and sys.argv[5] == "1"
 cfg_path = f"{team_dir}/config.json"
-with open(cfg_path) as f:
-    cfg = json.load(f)
+try:
+    with open(cfg_path) as f:
+        cfg = json.load(f)
+except FileNotFoundError:
+    cfg = {"name": team_dir.split('/')[-1], "members": []}
 team_name = cfg.get('name', team_dir.split('/')[-1])
 updated = False
 for m in cfg['members']:

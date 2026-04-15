@@ -111,25 +111,67 @@ function atomicWrite(filePath, data) {
   fs.renameSync(tmp, filePath);
 }
 
+// mkdir-based cross-process file lock. Coordinates with Python
+// scripts/_filelock.py that uses the same `<path>.lock.d` mutex.
+// Prevents lost updates when notify_shutdown.py and writeToLeadImpl
+// concurrently read-modify-write the same team-lead.json outbox.
+function withLock(targetPath, fn) {
+  const lockPath = targetPath + '.lock.d';
+  let acquired = false;
+  for (let i = 0; i < 200; i++) {
+    try {
+      fs.mkdirSync(lockPath);
+      acquired = true;
+      break;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      const start = Date.now();
+      while (Date.now() - start < 25) {} // busy-wait 25ms
+    }
+  }
+  if (!acquired) throw new Error(`could not acquire lock on ${targetPath}`);
+  try {
+    return fn();
+  } finally {
+    try { fs.rmdirSync(lockPath); } catch (_) {}
+  }
+}
+
+// Cap with read-message preference: when over cap, drop oldest READ
+// message first; only drop oldest unread as a last resort. Prevents
+// the double-push (response + idle_notification) from silently losing
+// unread messages at the 50-cap boundary.
+function trimToCap(msgs, cap) {
+  while (msgs.length > cap) {
+    const idx = msgs.findIndex(m => m.read);
+    if (idx >= 0) msgs.splice(idx, 1);
+    else msgs.shift();
+  }
+  return msgs;
+}
+
 function writeToLeadImpl(text, summary) {
   if (!OUTBOX)                    return 'error: CLMUX_OUTBOX not set';
   if (!validateOutboxPath(OUTBOX)) return 'error: CLMUX_OUTBOX path is invalid or outside allowed directory';
   if (!AGENT_NAME)                return 'error: AGENT_NAME not set (pass --agent or set CLMUX_AGENT)';
   try {
-    let msgs = [];
-    try { msgs = JSON.parse(fs.readFileSync(OUTBOX, 'utf-8')); } catch (_) { msgs = []; }
-    const ts1 = nowTs();
-    const entry = { from: AGENT_NAME, text, timestamp: ts1, read: false };
-    if (summary) entry.summary = summary;
-    msgs.push(entry);
-    const ts2 = nowTs();
-    const idlePayload = JSON.stringify({
-      type: 'idle_notification', from: AGENT_NAME, idleReason: 'available', timestamp: ts2,
+    return withLock(OUTBOX, () => {
+      let msgs = [];
+      try { msgs = JSON.parse(fs.readFileSync(OUTBOX, 'utf-8')); } catch (_) { msgs = []; }
+      const ts1 = nowTs();
+      const entry = { from: AGENT_NAME, text, timestamp: ts1, read: false };
+      if (summary) entry.summary = summary;
+      msgs.push(entry);
+      trimToCap(msgs, 50);
+      const ts2 = nowTs();
+      const idlePayload = JSON.stringify({
+        type: 'idle_notification', from: AGENT_NAME, idleReason: 'available', timestamp: ts2,
+      });
+      msgs.push({ from: AGENT_NAME, text: idlePayload, timestamp: ts2, read: false });
+      trimToCap(msgs, 50);
+      atomicWrite(OUTBOX, msgs);
+      return 'ok: response delivered to lead';
     });
-    msgs.push({ from: AGENT_NAME, text: idlePayload, timestamp: ts2, read: false });
-    if (msgs.length > 50) msgs = msgs.slice(-50);
-    atomicWrite(OUTBOX, msgs);
-    return 'ok: response delivered to lead';
   } catch (exc) {
     return `error: ${exc}`;
   }

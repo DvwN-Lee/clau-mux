@@ -314,3 +314,37 @@ class TestMeetingLock:
         orch.claim_meeting("m-001", topic="a", started_by="%105", team_name="t1")
         orch.release_meeting("m-999")  # wrong id — should be silent no-op
         assert orch.current_meeting()["meeting_id"] == "m-001"
+
+
+class TestPanes:
+    def test_register_pane_stores_entry(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.register_pane("%128", role="sub", master="%105", label="issue-17")
+        panes = orch.list_panes()
+        assert "%128" in panes
+        assert panes["%128"]["role"] == "sub"
+        assert panes["%128"]["master_pane"] == "%105"
+        assert panes["%128"]["label"] == "issue-17"
+
+    def test_register_pane_updates_last_seen(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.register_pane("%105", role="master", master=None)
+        first_seen = orch.list_panes()["%105"]["last_seen"]
+        import time; time.sleep(0.01)
+        orch.register_pane("%105", role="master", master=None)
+        second_seen = orch.list_panes()["%105"]["last_seen"]
+        assert second_seen > first_seen
+
+    def test_unregister_pane_removes_entry(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.register_pane("%128", role="sub", master="%105")
+        orch.unregister_pane("%128")
+        assert "%128" not in orch.list_panes()
+
+    def test_list_panes_empty_initially(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        assert orch.list_panes() == {}

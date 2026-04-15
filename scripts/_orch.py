@@ -381,3 +381,56 @@ def release_meeting(meeting_id: str, force: bool = False) -> None:
                 raise MeetingLockError(
                     f"cannot remove lock dir {lock}; inspect and rm manually"
                 )
+
+
+# ─── panes (registry) ───────────────────────────────────────────────────────
+
+def _panes_path() -> Path:
+    return root() / "panes.json"
+
+
+def list_panes() -> dict:
+    """Return the panes registry. Empty dict if not yet created."""
+    path = _panes_path()
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def register_pane(pane_id: str, role: str, master: str | None = None,
+                  label: str = "") -> None:
+    """Add or refresh a pane entry. last_seen always updates to now.
+
+    [v3 per 2026-04-15 cross-review] `project_root` field removed from Phase 1
+    (YAGNI — no query filter uses it yet). Deferred to Phase 2 Roadmap as part
+    of "Cross-project query filters".
+    """
+    ensure_layout()
+    path = _panes_path()
+    with file_lock(str(path)):
+        current = list_panes()
+        entry = current.get(pane_id, {})
+        entry.update({
+            "role": role,
+            "master_pane": master,
+            "label": label or entry.get("label", ""),
+            "last_seen": _now_ts(),
+        })
+        if "registered_at" not in entry:
+            entry["registered_at"] = entry["last_seen"]
+        current[pane_id] = entry
+        atomic_json_write(path, current)
+
+
+def unregister_pane(pane_id: str) -> None:
+    """Remove a pane entry. No error if absent."""
+    ensure_layout()
+    path = _panes_path()
+    with file_lock(str(path)):
+        current = list_panes()
+        if pane_id in current:
+            del current[pane_id]
+            atomic_json_write(path, current)

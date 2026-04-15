@@ -200,3 +200,81 @@ class TestEnvelope:
         )
         with pytest.raises(orch.EnvelopeError, match="required_changes.*must be list"):
             orch.validate_envelope(env)
+
+
+class TestMasterLock:
+    def test_claim_master_when_none(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.claim_master("%105", label="main")
+        info = orch.current_master()
+        assert info["pane_id"] == "%105"
+        assert info["label"] == "main"
+
+    def test_claim_master_when_already_held_by_same_pane(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.claim_master("%105", label="main")
+        # Re-claim by same pane is idempotent
+        orch.claim_master("%105", label="main")
+        assert orch.current_master()["pane_id"] == "%105"
+
+    def test_claim_master_when_held_by_other_raises(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.claim_master("%105", label="a")
+        with pytest.raises(orch.MasterLockError, match="held by %105"):
+            orch.claim_master("%200", label="b")
+
+    def test_handover_master_transfers(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.claim_master("%105", label="a")
+        orch.handover_master(from_pane="%105", to_pane="%200", label="b")
+        assert orch.current_master()["pane_id"] == "%200"
+        assert orch.current_master()["label"] == "b"
+
+    def test_handover_from_wrong_pane_raises(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.claim_master("%105", label="a")
+        with pytest.raises(orch.MasterLockError, match="not held by %999"):
+            orch.handover_master(from_pane="%999", to_pane="%200", label="b")
+
+    def test_release_master(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.claim_master("%105", label="a")
+        orch.release_master("%105")
+        assert orch.current_master() is None
+
+    def test_current_master_none_initially(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        assert orch.current_master() is None
+
+    def test_release_master_force_clears_stale_lock(self, tmp_path, monkeypatch):
+        """[H3] force=True recovers a stale lock where metadata is missing."""
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        # Simulate crash after mkdir but before metadata write
+        orch._master_lock_dir().mkdir()
+        # current_master() treats this as stale (returns None)
+        assert orch.current_master() is None
+        # Non-force release from a claimant: no-op because current_master is None
+        orch.release_master("%105")
+        # Lock dir still exists — stale
+        assert orch._master_lock_dir().is_dir()
+        # Force release clears it
+        orch.release_master("%999", force=True)
+        assert not orch._master_lock_dir().exists()
+        # Now a new pane can claim
+        orch.claim_master("%200", label="recovered")
+        assert orch.current_master()["pane_id"] == "%200"
+
+    def test_release_master_non_holder_without_force_raises(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.claim_master("%105", label="a")
+        with pytest.raises(orch.MasterLockError, match="not held by %999"):
+            orch.release_master("%999")

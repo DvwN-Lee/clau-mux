@@ -201,3 +201,183 @@ def validate_envelope(env: dict) -> None:
     # reject.allow_rescope defaults true if absent; normalize
     if kind == "reject" and "allow_rescope" not in body:
         body["allow_rescope"] = True
+
+
+# ─── lock (master + meeting) ────────────────────────────────────────────────
+#
+# Design note [H4 amendment per 2026-04-15 cross-review]:
+#   Lock directory (*.lock.d) is PURE MUTEX — empty directory used only for
+#   mkdir-atomicity. Metadata (pane_id, since, label, etc.) lives in a
+#   SIBLING JSON file (*.lock.meta.json) next to the lock dir. Rationale:
+#   atomic_json_write() creates temp files in the target's parent dir; if
+#   metadata lived inside the lock dir, a crash during the temp+rename
+#   sequence would strand `.tmp-*.json` files inside the lock dir and
+#   later rmdir() would fail with ENOTEMPTY — lock stays stuck forever.
+#   Keeping the lock dir empty makes rmdir() always succeed.
+
+class MasterLockError(RuntimeError):
+    """Raised on master-lock contention / illegal transition."""
+
+
+class MeetingLockError(RuntimeError):
+    """Raised on meeting-lock contention."""
+
+
+def _master_lock_dir() -> Path:
+    return root() / "master.lock.d"
+
+
+def _master_meta_path() -> Path:
+    return root() / "master.lock.meta.json"
+
+
+def _meeting_lock_dir() -> Path:
+    return root() / "meeting.lock.d"
+
+
+def _meeting_meta_path() -> Path:
+    return root() / "meeting.lock.meta.json"
+
+
+def current_master() -> dict | None:
+    """Return current Master info dict, or None if no master claimed.
+
+    Master is "claimed" iff both the lock dir AND the metadata file exist.
+    Either missing is treated as stale (see release_master --force).
+    """
+    if not _master_lock_dir().is_dir():
+        return None
+    meta = _master_meta_path()
+    if not meta.is_file():
+        return None
+    try:
+        return json.loads(meta.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def claim_master(pane_id: str, label: str = "") -> None:
+    """Atomically claim the master role for pane_id. Idempotent for same pane.
+
+    Two-step: mkdir lock dir (atomic), then write metadata (atomic).
+    If mkdir succeeds but metadata write fails, a subsequent current_master()
+    returns None (metadata missing) and the lock is treated as stale.
+    Manual recovery: release_master(pane, force=True).
+    """
+    ensure_layout()
+    lock = _master_lock_dir()
+    try:
+        lock.mkdir()
+    except FileExistsError:
+        existing = current_master()
+        if existing and existing.get("pane_id") == pane_id:
+            return  # idempotent
+        holder = existing.get("pane_id", "<unknown>") if existing else "<stale>"
+        raise MasterLockError(f"master role held by {holder}")
+    atomic_json_write(_master_meta_path(), {
+        "pane_id": pane_id,
+        "label": label,
+        "since": _now_ts(),
+    })
+
+
+def handover_master(from_pane: str, to_pane: str, label: str = "") -> None:
+    """Transfer master role from from_pane to to_pane. Requires current holder == from_pane."""
+    existing = current_master()
+    if not existing:
+        raise MasterLockError("no master currently held")
+    if existing.get("pane_id") != from_pane:
+        raise MasterLockError(f"master not held by {from_pane} (actual: {existing.get('pane_id')})")
+    atomic_json_write(_master_meta_path(), {
+        "pane_id": to_pane,
+        "label": label,
+        "since": _now_ts(),
+    })
+
+
+def release_master(pane_id: str, force: bool = False) -> None:
+    """Release master role. Only the current holder may release unless force=True.
+
+    [H3 amendment] `force=True` is the stale-lock recovery path: removes
+    the lock regardless of holder identity (or missing/corrupt metadata).
+    Surfaced via CLI as `clmux-orchestrate release-master --force`.
+    """
+    existing = current_master()
+    if not existing and not force:
+        return  # already released
+    if existing and not force and existing.get("pane_id") != pane_id:
+        raise MasterLockError(f"master not held by {pane_id}")
+    meta = _master_meta_path()
+    if meta.is_file():
+        try:
+            meta.unlink()
+        except OSError:
+            pass
+    lock = _master_lock_dir()
+    if lock.is_dir():
+        try:
+            lock.rmdir()
+        except OSError:
+            # Should not happen since lock dir is kept empty, but if
+            # something external dropped a file here, force caller must
+            # clean up manually. Surface via exception only if non-force.
+            if not force:
+                raise MasterLockError(
+                    f"cannot remove lock dir {lock}; inspect and rm manually"
+                )
+
+
+def current_meeting() -> dict | None:
+    """Return current meeting info dict, or None."""
+    if not _meeting_lock_dir().is_dir():
+        return None
+    meta = _meeting_meta_path()
+    if not meta.is_file():
+        return None
+    try:
+        return json.loads(meta.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def claim_meeting(meeting_id: str, topic: str, started_by: str, team_name: str) -> None:
+    """Claim meeting slot. Raises MeetingLockError if another meeting active."""
+    ensure_layout()
+    lock = _meeting_lock_dir()
+    try:
+        lock.mkdir()
+    except FileExistsError:
+        existing = current_meeting()
+        holder = existing.get("meeting_id", "<unknown>") if existing else "<stale>"
+        raise MeetingLockError(f"another meeting in progress: {holder}")
+    atomic_json_write(_meeting_meta_path(), {
+        "meeting_id": meeting_id,
+        "topic": topic,
+        "started_by": started_by,
+        "team_name": team_name,
+        "started_at": _now_ts(),
+    })
+
+
+def release_meeting(meeting_id: str, force: bool = False) -> None:
+    """Release meeting slot. [H3] force=True bypasses id check for stale-lock recovery."""
+    existing = current_meeting()
+    if not existing and not force:
+        return  # nothing to release
+    if existing and not force and existing.get("meeting_id") != meeting_id:
+        return  # id mismatch, silent no-op unless forced
+    meta = _meeting_meta_path()
+    if meta.is_file():
+        try:
+            meta.unlink()
+        except OSError:
+            pass
+    lock = _meeting_lock_dir()
+    if lock.is_dir():
+        try:
+            lock.rmdir()
+        except OSError:
+            if not force:
+                raise MeetingLockError(
+                    f"cannot remove lock dir {lock}; inspect and rm manually"
+                )

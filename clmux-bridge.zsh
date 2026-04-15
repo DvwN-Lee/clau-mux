@@ -85,6 +85,7 @@ wait_for_idle || { echo "[clmux-bridge] error: CLI not ready (pattern: $IDLE_PAT
 echo "[clmux-bridge] ready — polling inbox every 2s (Ctrl+C to stop)"
 
 _defer_count=0
+_paste_fail_count=0
 while true; do
   if ! command -v tmux &>/dev/null; then
     echo "[clmux-bridge] error: tmux not in PATH, retrying..." >&2
@@ -142,14 +143,16 @@ except: print('')
     if ! wait_for_idle; then
       (( _defer_count++ ))
       if (( _defer_count >= 6 )); then
-        echo "[clmux-bridge] error: idle timeout after ${_defer_count} retries, skipping message" >&2
-        [[ -n "$ts" ]] && mark_read "$ts"
-        _defer_count=0
-      else
-        echo "[clmux-bridge] warning: not idle, deferring send (${_defer_count}/6)" >&2
-        sleep 5
-        continue
+        # Per queue-lifecycle invariant: persistent unresponsiveness ends
+        # the agent session. Killing the pane triggers cleanup() which
+        # purges the inbox so messages don't linger as data loss.
+        echo "[clmux-bridge] error: idle timeout after ${_defer_count} retries, killing pane (queue will be purged)" >&2
+        tmux kill-pane -t "$PANE_ID" 2>/dev/null
+        exit 0
       fi
+      echo "[clmux-bridge] warning: not idle, deferring send (${_defer_count}/6)" >&2
+      sleep 5
+      continue
     fi
     _defer_count=0
 
@@ -182,18 +185,32 @@ except: print('')
         fi
       done
       if [[ "$_chunk_fail" == true ]]; then
+        (( _paste_fail_count++ ))
+        if (( _paste_fail_count >= 3 )); then
+          echo "[clmux-bridge] error: paste-buffer failed ${_paste_fail_count} times, killing pane (queue will be purged)" >&2
+          tmux kill-pane -t "$PANE_ID" 2>/dev/null
+          exit 0
+        fi
         sleep 2; continue
       fi
     else
       _buf="clmux-${$}-${RANDOM}"
+      _single_fail=false
       if ! printf '%s' "$text" | tmux load-buffer -b "$_buf" - 2>/dev/null; then
         echo "[clmux-bridge] error: load-buffer failed (pane:$PANE_ID)" >&2
-        sleep 2
-        continue
-      fi
-      if ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
+        _single_fail=true
+      elif ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
         echo "[clmux-bridge] error: paste-buffer failed (pane:$PANE_ID)" >&2
         tmux delete-buffer -b "$_buf" 2>/dev/null
+        _single_fail=true
+      fi
+      if [[ "$_single_fail" == true ]]; then
+        (( _paste_fail_count++ ))
+        if (( _paste_fail_count >= 3 )); then
+          echo "[clmux-bridge] error: paste-buffer failed ${_paste_fail_count} times, killing pane (queue will be purged)" >&2
+          tmux kill-pane -t "$PANE_ID" 2>/dev/null
+          exit 0
+        fi
         sleep 2
         continue
       fi
@@ -221,6 +238,7 @@ except: print('')
     [[ "$_enter_ok" == false ]] && echo "[clmux-bridge] error: Enter not accepted after 5 retries" >&2
 
     [[ -n "$ts" ]] && mark_read "$ts"
+    _paste_fail_count=0
   fi
 
   sleep 2

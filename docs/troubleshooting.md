@@ -151,3 +151,44 @@ tail -50 /tmp/clmux-bridge-codex-worker.log
 ```
 TeamCreate(team_name: "<team_name>")
 ```
+
+---
+
+#### Bridge가 시동 시 즉시 종료 (`error: CLI not ready`)
+
+브리지 로그에 아래와 같이 찍히면 CLI가 `-x <timeout>` 안에 idle 패턴에 도달하지 못해 브리지가 종료된 것입니다.
+
+```
+[clmux-bridge] started — pane:%N  agent:...
+[clmux-bridge] warning: idle timeout after 30s
+[clmux-bridge] error: CLI not ready (pattern: ...)
+```
+
+CLI별 권장 timeout (시스템 부하에 따라 더 길게):
+
+| CLI | 기본 | 권장 (느린 시스템) |
+|---|---|---|
+| Gemini | 30s | `-x 60~120` |
+| Codex | 30s | `-x 60~120` |
+| Copilot | 30s | `-x 120~240` (인증/초기화가 특히 느림) |
+
+예: `clmux-copilot -t myteam -x 240`
+
+시동 실패 시에는 Commit 1 lifecycle 핸들러가 자동으로 `config.isActive: false` 전환하고 `inbox`를 purge하므로 Ghost Agent 상태는 발생하지 않습니다. 단순히 더 긴 timeout으로 재스폰하세요.
+
+---
+
+#### Queue가 무한 누적되는 것처럼 보임
+
+Commit 1-5의 "queue lifecycle = agent session lifecycle" invariant 적용 후에는 발생하지 않아야 합니다. 만약 여전히 누적되면:
+
+1. bridge 프로세스가 살아있는지: `ps aux | grep clmux-bridge | grep <team>`
+2. pane이 살아있는지: `tmux list-panes -a`
+3. `config.json`에서 해당 teammate의 `isActive`가 `false`인데 inbox에 메시지가 쌓이면 Lead 쪽 routing 이슈 → `TeamCreate` 재호출 또는 해당 teammate 재스폰
+
+Bridge가 죽으면서 cleanup을 못 한 경우(SIGKILL 등), 수동으로:
+
+```bash
+python3 $CLMUX_DIR/scripts/purge_inbox.py \
+  ~/.claude/teams/<team>/inboxes/<agent>.json
+```

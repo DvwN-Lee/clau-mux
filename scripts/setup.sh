@@ -202,6 +202,30 @@ if [[ -d "$CACHE_BASE" ]]; then
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# 7. Claude Code hooks (~/.claude/hooks/) — 선택
+# ---------------------------------------------------------------------------
+HOOKS_SRC="$CLMUX_DIR/hooks"
+HOOKS_DST="$HOME/.claude/hooks"
+
+if [[ -d "$HOOKS_SRC" ]]; then
+  read -r -p "Install clau-mux hooks to ~/.claude/hooks/ (guard-task-bridge)? [Y/n] " hooks_answer
+  hooks_answer="${hooks_answer:-Y}"
+  if [[ "$hooks_answer" =~ ^[Yy]$ ]]; then
+    mkdir -p "$HOOKS_DST"
+    for f in "$HOOKS_SRC"/*.py; do
+      [[ -f "$f" ]] || continue
+      cp "$f" "$HOOKS_DST/"
+      echo "[OK]   Copied $(basename "$f") to $HOOKS_DST/"
+    done
+    echo "[NOTE] Register in ~/.claude/settings.json under PreToolUse:"
+    echo '       {"matcher": "TaskCreate|TaskUpdate", "hooks": [{"type": "command",'
+    echo '        "command": "python3 ~/.claude/hooks/guard-task-bridge.py", "timeout": 5}]}'
+  else
+    echo "[SKIP] Hooks install skipped"
+  fi
+fi
+
 echo ""
 echo "=== Setup complete ==="
 echo "Run 'source ~/.zshrc' to activate clmux in your current shell."

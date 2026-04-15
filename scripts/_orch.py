@@ -671,3 +671,194 @@ def notify_pane(target_pane: str, message: str, buf_prefix: str = "orch") -> boo
         return True
     except subprocess.CalledProcessError:
         return False
+
+
+# ─── meeting (lifecycle + WORM archive) ─────────────────────────────────────
+# [B1 v3] _shutil no longer needed — use _atomic_copy_file helper above.
+
+
+def _teams_dir() -> Path:
+    return Path(os.environ.get("HOME", str(Path.home()))) / ".claude" / "teams"
+
+
+def start_meeting(started_by: str, topic: str, team_name: str) -> str:
+    """Claim the meeting lock and return a new meeting_id.
+
+    Caller is responsible for actually creating the clmux team
+    (via TeamCreate) and adding bridges. This function only manages
+    the orchestration-side lock + id.
+    """
+    mid = _rand_id("m")
+    claim_meeting(mid, topic=topic, started_by=started_by, team_name=team_name)
+    return mid
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """[H2] Write text atomically via tempfile + os.replace. [B2] symlink-safe.
+
+    Required for any archive file that will later be chmodded to 0o444.
+    A non-atomic write (write_text) plus chmod sequence can leave a
+    partial file permanently read-only if the process crashes mid-write.
+    """
+    path = _safe_within_root(Path(path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sigterm_guard():
+        with tempfile.NamedTemporaryFile(
+            mode="w", dir=str(path.parent), delete=False, suffix=".tmp",
+            encoding="utf-8"
+        ) as tf:
+            tf.write(text)
+            tmp_name = tf.name
+        os.replace(tmp_name, path)
+
+
+def _atomic_copy_file(src: Path, dst: Path) -> None:
+    """[B1] Copy src → dst atomically: read bytes → tempfile in dst.parent → os.replace.
+
+    Replaces the v2 `shutil.copy2()` usage which is NOT atomic (copy2 writes
+    directly to dst and can leave a partial destination on crash). For
+    archive durability, use this helper instead. Preserves mtime.
+    [B2] symlink-safe for dst.
+    """
+    src = Path(src)
+    dst = _safe_within_root(Path(dst))
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    data = src.read_bytes()
+    stat = src.stat()
+    with sigterm_guard():
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=str(dst.parent), delete=False, suffix=".tmp"
+        ) as tf:
+            tf.write(data)
+            tmp_name = tf.name
+        os.replace(tmp_name, dst)
+    # Preserve mtime (best-effort; chmod 444 will happen later in phase 3)
+    try:
+        os.utime(dst, (stat.st_atime, stat.st_mtime))
+    except OSError:
+        pass
+
+
+def end_meeting(meeting_id: str, synthesis: str) -> None:
+    """Archive the meeting team to WORM and release the lock.
+
+    Archive layout:
+      meetings/<meeting_id>/
+        metadata.json   — {meeting_id, topic, started_by, started_at, ended_at, team_name, participants}
+        config.json     — team config snapshot
+        outbox.json     — team-lead.json outbox snapshot
+        inboxes/        — per-member inbox snapshots
+        synthesis.md    — master's written conclusion
+
+    [B1 amendment per 2026-04-15 v3 cross-review] Redesigned ordering:
+
+      Phase 1 — WRITE everything atomically (no chmod):
+        config.json, outbox.json, inboxes/*, metadata.json, synthesis.md.
+        Every file write uses either `_atomic_write_text` (for generated
+        text) or `_atomic_copy_file` (for source-file archiving). The v2
+        draft used `shutil.copy2()` here, which is NOT atomic — copy2
+        writes directly to the destination, and a crash mid-copy leaves
+        a partial file. v3 replaces all copy2 calls with the temp+replace
+        helper so every archived file appears all-or-nothing.
+
+      Phase 2 — VERIFY writability before chmod:
+        Confirm all target files are still writable by our user (not
+        accidentally restricted by umask or prior partial run).
+
+      Phase 3 — CHMOD 444 in a single final pass:
+        Once the archive is complete, apply read-only in one loop.
+
+      Phase 4 — RELEASE lock:
+        Only after chmod succeeds. If crash occurs in phases 1-3, the
+        lock is still held and retry is safe (all writes are atomic and
+        idempotent — a retry simply re-atomic-replaces each file with
+        identical content; chmod is idempotent).
+
+    Rationale: the previous design wrote synthesis non-atomically and
+    intermixed chmod with writes. A crash after even one chmod 444 could
+    leave a partially-locked archive where subsequent retries would fail
+    with PermissionError — meeting_lock permanently wedged.
+
+    Crash recovery: if end_meeting crashes between phases, caller may
+    retry `end_meeting(same_id, same_synthesis)`. If the lock is wedged
+    and recovery fails, operator uses `release_meeting(id, force=True)`.
+    """
+    current = current_meeting()
+    if not current or current.get("meeting_id") != meeting_id:
+        raise MeetingLockError(f"no active meeting with id {meeting_id}")
+
+    team_name = current["team_name"]
+    team_dir = _teams_dir() / team_name
+    archive_dir = root() / "meetings" / meeting_id
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Phase 1: atomic writes ─────────────────────────────────────────
+    # [B1] Use _atomic_copy_file (temp + os.replace) — NOT shutil.copy2.
+    cfg_src = team_dir / "config.json"
+    cfg_dst = archive_dir / "config.json"
+    if cfg_src.is_file():
+        _atomic_copy_file(cfg_src, cfg_dst)
+    else:
+        _atomic_write_text(cfg_dst, '{"warning":"source config missing"}')
+
+    outbox_src = team_dir / "inboxes" / "team-lead.json"
+    outbox_dst = archive_dir / "outbox.json"
+    if outbox_src.is_file():
+        _atomic_copy_file(outbox_src, outbox_dst)
+    else:
+        _atomic_write_text(outbox_dst, "[]")
+
+    # Member inboxes
+    inboxes_dst = archive_dir / "inboxes"
+    inboxes_dst.mkdir(exist_ok=True)
+    inboxes_src = team_dir / "inboxes"
+    participants: list = []
+    member_dsts: list = []
+    if inboxes_src.is_dir():
+        for member_inbox in sorted(inboxes_src.glob("*.json")):
+            if member_inbox.name == "team-lead.json":
+                continue
+            dst = inboxes_dst / member_inbox.name
+            _atomic_copy_file(member_inbox, dst)
+            participants.append(member_inbox.stem)
+            member_dsts.append(dst)
+
+    # Metadata
+    meta = {
+        "meeting_id": meeting_id,
+        "topic": current["topic"],
+        "started_by": current["started_by"],
+        "started_at": current["started_at"],
+        "ended_at": _now_ts(),
+        "team_name": team_name,
+        "participants": participants,
+    }
+    meta_dst = archive_dir / "metadata.json"
+    atomic_json_write(meta_dst, meta)
+
+    # Synthesis — was non-atomic in v1; now atomic [H2]
+    synthesis_dst = archive_dir / "synthesis.md"
+    _atomic_write_text(synthesis_dst, synthesis or "")
+
+    # ── Phase 2: writability verification ──────────────────────────────
+    all_files = [cfg_dst, outbox_dst, meta_dst, synthesis_dst] + member_dsts
+    for f in all_files:
+        if not f.is_file():
+            raise RuntimeError(f"archive integrity check failed: {f} missing")
+        # If any file is already read-only from a partial prior run,
+        # restore writability before the final chmod pass so os.chmod
+        # itself cannot fail mid-loop.
+        try:
+            os.chmod(f, 0o644)
+        except OSError as e:
+            raise RuntimeError(
+                f"cannot restore writability on {f}: {e} — "
+                f"use release_meeting(id, force=True) to recover"
+            )
+
+    # ── Phase 3: single chmod 444 pass ─────────────────────────────────
+    for f in all_files:
+        os.chmod(f, 0o444)
+
+    # ── Phase 4: release lock (only after archive is durable + immutable)
+    release_meeting(meeting_id)

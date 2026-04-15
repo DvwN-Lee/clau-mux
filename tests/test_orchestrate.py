@@ -579,3 +579,67 @@ class TestNotify:
         # Should not raise, just return False
         ok = orch.notify_pane("%128", "hello")
         assert ok is False
+
+
+class TestMeeting:
+    def test_start_meeting_creates_lock_and_returns_id(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        mid = orch.start_meeting(started_by="%105", topic="test",
+                                  team_name="meeting-t1")
+        assert mid.startswith("m-")
+        assert orch.current_meeting()["meeting_id"] == mid
+
+    def test_end_meeting_archives_team_and_releases_lock(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        # Simulate a clmux team directory
+        team_dir = tmp_path / ".claude" / "teams" / "meeting-t2"
+        (team_dir / "inboxes").mkdir(parents=True)
+        (team_dir / "config.json").write_text(
+            json.dumps({"name": "meeting-t2", "members": [
+                {"name": "codex", "agentType": "bridge"}
+            ]})
+        )
+        (team_dir / "inboxes" / "team-lead.json").write_text(
+            json.dumps([{"from": "codex", "text": "hello"}])
+        )
+        (team_dir / "inboxes" / "codex.json").write_text("[]")
+
+        mid = orch.start_meeting(started_by="%105", topic="topic 2",
+                                  team_name="meeting-t2")
+        orch.end_meeting(mid, synthesis="Decision: do X")
+
+        # Lock released
+        assert orch.current_meeting() is None
+        # Archive exists
+        archive = tmp_path / ".claude" / "orchestration" / "meetings" / mid
+        assert (archive / "config.json").is_file()
+        assert (archive / "outbox.json").is_file()
+        assert (archive / "inboxes" / "codex.json").is_file()
+        assert (archive / "metadata.json").is_file()
+        assert (archive / "synthesis.md").read_text().startswith("Decision")
+
+    def test_end_meeting_archive_is_worm_readonly(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        team_dir = tmp_path / ".claude" / "teams" / "meeting-t3"
+        (team_dir / "inboxes").mkdir(parents=True)
+        (team_dir / "config.json").write_text('{"name":"meeting-t3"}')
+        (team_dir / "inboxes" / "team-lead.json").write_text("[]")
+
+        mid = orch.start_meeting(started_by="%105", topic="t3", team_name="meeting-t3")
+        orch.end_meeting(mid, synthesis="sy")
+
+        archive = tmp_path / ".claude" / "orchestration" / "meetings" / mid
+        # Each archived file is 0o444 (read-only)
+        for f in ["config.json", "outbox.json", "synthesis.md", "metadata.json"]:
+            path = archive / f
+            assert path.is_file()
+            assert oct(path.stat().st_mode)[-3:] == "444"
+
+    def test_end_meeting_unknown_id_raises(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        with pytest.raises(orch.MeetingLockError, match="no active meeting"):
+            orch.end_meeting("m-nonexistent", synthesis="")

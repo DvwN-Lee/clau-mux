@@ -630,3 +630,44 @@ def mark_inbox_read(pane_id: str) -> None:
             with open(archive, "a", encoding="utf-8") as af:
                 af.write(content)
             path.unlink()
+
+
+# ─── notify (tmux paste-buffer) ─────────────────────────────────────────────
+
+import shutil
+import subprocess
+
+
+def _tmux_load_buffer(buf_name: str, data: str) -> None:
+    """Pipe data to `tmux load-buffer -b <buf_name> -`."""
+    subprocess.run(
+        ["tmux", "load-buffer", "-b", buf_name, "-"],
+        input=data.encode("utf-8"),
+        check=True,
+    )
+
+
+def notify_pane(target_pane: str, message: str, buf_prefix: str = "orch") -> bool:
+    """Paste a single-line alert into target_pane followed by Enter.
+
+    Uses `paste-buffer -p` (bracketed paste) so newlines remain literal
+    and a runaway message can't inject multiple keypresses.
+
+    Returns True on success, False if tmux is unavailable.
+    """
+    if shutil.which("tmux") is None:
+        return False
+    buf = f"{buf_prefix}-{os.getpid()}-{secrets.token_hex(4)}"
+    try:
+        _tmux_load_buffer(buf, message)
+        subprocess.run(
+            ["tmux", "paste-buffer", "-d", "-p", "-b", buf, "-t", target_pane],
+            check=True,
+        )
+        subprocess.run(
+            ["tmux", "send-keys", "-t", target_pane, "Enter"],
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False

@@ -530,3 +530,52 @@ class TestInbox:
         orch.ensure_layout()
         orch.mark_inbox_read("%128")  # no error
         assert orch.read_inbox("%128") == []
+
+
+class TestNotify:
+    def test_notify_pane_invokes_expected_tmux_calls(self, tmp_path, monkeypatch):
+        """[B2 amendment per 2026-04-15 cross-review] Must mock shutil.which
+        so the test does not depend on tmux being installed on the CI runner.
+        Without this mock, CI without tmux returns None → notify_pane exits
+        early → no subprocess calls → assertions fail.
+        """
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        recorded = []
+
+        # [B2] Fake tmux availability
+        monkeypatch.setattr(orch.shutil, "which", lambda cmd: "/usr/bin/tmux")
+
+        def fake_run(args, **kwargs):
+            recorded.append(tuple(args))
+            class R:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr(orch.subprocess, "run", fake_run)
+        # Avoid actually running tmux load-buffer via stdin
+        def fake_load(buf, data):
+            recorded.append(("load-buffer", buf, len(data)))
+        monkeypatch.setattr(orch, "_tmux_load_buffer", fake_load)
+
+        orch.notify_pane("%128", "[orch] thread=t-001 kind=delegate from=%105")
+
+        kinds = [r[0] if isinstance(r, tuple) else r for r in recorded]
+        # Expect load-buffer → paste-buffer → send-keys Enter
+        assert any("load-buffer" in str(r) for r in recorded)
+        assert any("paste-buffer" in str(r) for r in recorded)
+        assert any(r for r in recorded if "send-keys" in str(r) and "Enter" in str(r))
+
+    def test_notify_pane_skipped_when_tmux_unavailable(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+
+        def fake_which(cmd):
+            return None  # tmux not found
+
+        monkeypatch.setattr(orch.shutil, "which", fake_which)
+        # Should not raise, just return False
+        ok = orch.notify_pane("%128", "hello")
+        assert ok is False

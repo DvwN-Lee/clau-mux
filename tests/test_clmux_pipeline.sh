@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/test_clmux_pipeline.sh  (commit 1: create subcommand tests)
+# tests/test_clmux_pipeline.sh  (commit 2: shutdown tests added)
 set -euo pipefail
 
 CLMUX_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -37,12 +37,23 @@ assert_eq() {
     fi
 }
 
+assert_session_exists() {
+    tmux has-session -t "$1" 2>/dev/null || { fail "session '$1' should exist but does not"; return 1; }
+}
+
+assert_session_gone() {
+    if tmux has-session -t "$1" 2>/dev/null; then
+        fail "session '$1' should be gone but still exists"
+        return 1
+    fi
+}
+
 PFX="testpipe_$$"
 
 # Test 1: create --headless
 sess="${PFX}_1"
 pane_id=$($PIPELINE create "$sess" --headless)
-tmux has-session -t "$sess" 2>/dev/null || { fail "session '$sess' should exist"; }
+assert_session_exists "$sess"
 [[ "$pane_id" == %* ]] || { fail "pane_id should start with % got='$pane_id'"; }
 wid=$(tmux show-option -t "$sess" -v @iterm_window_id 2>/dev/null || true)
 assert_eq "$wid" "" "no @iterm_window_id in headless mode"
@@ -65,6 +76,53 @@ if [[ "$actual_cwd" != "/tmp" && "$actual_cwd" != "$resolved_tmp" ]]; then
     fail "pane_current_path should be /tmp or $resolved_tmp, got '$actual_cwd'"
 fi
 pass "create --headless --cwd /tmp — pane_current_path is /tmp (or resolved)"
+
+# Test 4: shutdown --dry-run
+sess="${PFX}_4"
+$PIPELINE create "$sess" --headless --tag "drytest" >/dev/null
+output=$($PIPELINE shutdown "$sess" --dry-run)
+assert_session_exists "$sess"
+[[ "$output" == *"DRY-RUN"* ]] || { fail "dry-run output should contain DRY-RUN"; }
+[[ "$output" == *"$sess"* ]] || { fail "dry-run output should contain session name"; }
+pass "shutdown --dry-run does not kill session and prints info"
+
+# Test 5: shutdown graceful (zsh-only pane)
+sess="${PFX}_5"
+$PIPELINE create "$sess" --headless >/dev/null
+sleep 0.5
+ec=0
+$PIPELINE shutdown "$sess" --timeout 8 || ec=$?
+assert_eq "$ec" "0" "graceful shutdown of zsh session should exit 0"
+assert_session_gone "$sess"
+pass "shutdown zsh-only pane — graceful exit code 0, session gone"
+
+# Test 6: shutdown timeout -> force fallback (exit 2)
+sess="${PFX}_6"
+$PIPELINE create "$sess" --headless >/dev/null
+sleep 0.3
+tmux send-keys -t "$sess" "sleep 60" Enter
+sleep 0.3
+ec=0
+$PIPELINE shutdown "$sess" --timeout 2 || ec=$?
+assert_eq "$ec" "2" "force fallback exit code should be 2"
+assert_session_gone "$sess"
+pass "shutdown with sleep 60 + --timeout 2 triggers force fallback, exit 2"
+
+# Test 7: shutdown --force
+sess="${PFX}_7"
+$PIPELINE create "$sess" --headless >/dev/null
+ec=0
+$PIPELINE shutdown "$sess" --force || ec=$?
+assert_eq "$ec" "0" "force shutdown exit code should be 0"
+assert_session_gone "$sess"
+pass "shutdown --force immediate kill, exit 0"
+
+# Test 8: shutdown non-existent -> exit 0
+nonexist="${PFX}_nonexistent_$$"
+ec=0
+$PIPELINE shutdown "$nonexist" || ec=$?
+assert_eq "$ec" "0" "shutdown on missing session should be idempotent (exit 0)"
+pass "shutdown non-existent session exits 0 (idempotent)"
 
 if [[ "$fail_count" -gt 0 ]]; then
     echo "FAIL: $fail_count test(s) failed out of $test_count" >&2

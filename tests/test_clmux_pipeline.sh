@@ -55,6 +55,24 @@ assert_session_gone() {
     fi
 }
 
+# Poll for a session's first pane to be running zsh, up to ~3s.
+# Returns 0 on success, 1 on timeout. Avoids flakes on loaded CI runners where
+# a fixed 'sleep 0.3' after tmux new-session may fire before zsh is ready and
+# cause send-keys to drop.
+_wait_for_zsh() {
+    local target="$1"
+    local cmd attempts=0
+    while (( attempts < 30 )); do
+        cmd=$(tmux display-message -p -t "$target" '#{pane_current_command}' 2>/dev/null || true)
+        if [[ "$cmd" == "zsh" ]]; then
+            return 0
+        fi
+        sleep 0.1
+        attempts=$(( attempts + 1 ))
+    done
+    return 1
+}
+
 # Unique prefix per run to avoid collision with user sessions
 PFX="testpipe_$$"
 
@@ -84,8 +102,8 @@ pass "create --headless --tag foo sets @pipeline_tag"
 # ---------------------------------------------------------------------------
 sess="${PFX}_3"
 $PIPELINE create "$sess" --headless --cwd /tmp >/dev/null
-# Give zsh a moment to start
-sleep 0.5
+# Wait for zsh to be ready so pane_current_path reflects the real cwd
+_wait_for_zsh "$sess" || { fail "test 3: zsh did not become ready within 3s"; }
 actual_cwd=$(tmux display-message -p -t "$sess" '#{pane_current_path}' 2>/dev/null || true)
 # macOS resolves /tmp -> /private/tmp; accept either
 resolved_tmp=$(cd /tmp && pwd -P)
@@ -110,8 +128,8 @@ pass "shutdown --dry-run does not kill session and prints info"
 # ---------------------------------------------------------------------------
 sess="${PFX}_5"
 $PIPELINE create "$sess" --headless >/dev/null
-# Allow zsh to fully start before we issue graceful shutdown
-sleep 0.5
+# Wait for zsh to be ready — fixed sleeps race on loaded runners
+_wait_for_zsh "$sess" || { fail "test 5: zsh did not become ready within 3s"; }
 ec=0
 $PIPELINE shutdown "$sess" --timeout 8 || ec=$?
 assert_eq "$ec" "0" "graceful shutdown of zsh session should exit 0"
@@ -124,9 +142,12 @@ pass "shutdown zsh-only pane — graceful exit code 0, session gone"
 # ---------------------------------------------------------------------------
 sess="${PFX}_6"
 $PIPELINE create "$sess" --headless >/dev/null
-sleep 0.3
-# Send sleep 60 to the pane so the shell won't exit on 'exit' quickly
+# Wait for zsh before send-keys; otherwise on slow runners the keystrokes
+# get dropped and the shell exits normally, giving the wrong exit code.
+_wait_for_zsh "$sess" || { fail "test 6: zsh did not become ready within 3s"; }
+# Send sleep 60 so the shell won't exit on 'exit' quickly
 tmux send-keys -t "$sess" "sleep 60" Enter
+# Give tmux a moment to deliver the keys and start the sleep
 sleep 0.3
 ec=0
 $PIPELINE shutdown "$sess" --timeout 2 || ec=$?

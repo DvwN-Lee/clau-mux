@@ -76,19 +76,23 @@ This is an atomic swap: `%105` loses Master role, `%128` gains it, and the lock 
 | `accept` | Master → Sub | — | note |
 | `reject` | Master → Sub | feedback | required_changes[] |
 | `blocked` | Sub → Master | question | options[], urgency |
-| `reply` | Master → Sub | answer | note, unblock_to |
+| `reply` | Master → Sub | answer | note |
 
-Phase 2 additions (not yet implemented): `progress_heartbeat`.
+Phase 2 additions (not yet implemented): `progress_heartbeat`, `reply.unblock_to` (currently always returns to IN_PROGRESS).
 
 ## State machine
 
 ```
-CREATED ──ack──> IN_PROGRESS ──progress──> IN_PROGRESS
-                      │ ├──report──> REPORTED ──accept──> ACCEPTED ──close──> CLOSED
-                      │ │                  └─reject──> IN_PROGRESS
-                      │ └──blocked──> BLOCKED ──reply──> IN_PROGRESS
-                      │
-                      └── ACCEPTED and CLOSED are terminal for this thread.
+CREATED
+  │
+  └─ack─► IN_PROGRESS ─progress─► IN_PROGRESS
+              │   │
+              │   ├─report─► REPORTED ─accept─► ACCEPTED ─close─► CLOSED
+              │   │                 └─reject─► IN_PROGRESS
+              │   │
+              │   └─blocked─► BLOCKED ─reply─► IN_PROGRESS
+              │
+              └── (ACCEPTED and CLOSED are terminal)
 ```
 
 Illegal transitions raise `TransitionError`. The envelope is appended to the audit log *before* the transition attempt (H1 ordering), so forensics can inspect rejected transitions.

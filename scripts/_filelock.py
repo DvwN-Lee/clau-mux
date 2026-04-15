@@ -1,15 +1,19 @@
-"""Cross-process advisory file lock using mkdir mutex.
+"""Cross-process advisory file lock + SIGTERM guard.
 
-mkdir is atomic on POSIX. Both Python (this module) and Node.js
-(equivalent helper inside bridge-mcp-server.js) use the same
-`<target>.lock.d` directory name to coordinate writes to a
-shared file (e.g., team-lead.json outbox).
+`file_lock`: mkdir-based mutex. Coordinates with bridge-mcp-server.js
+withLock() via the same `<target>.lock.d` directory name so Python
+and Node writers don't lose updates to the shared team-lead.json.
+
+`sigterm_guard`: ignore SIGTERM during a critical section so an
+in-flight tempfile + os.replace cycle cannot be killed mid-way,
+leaving an orphan `.tmp-*.json` and a half-written destination.
 
 Wait budget: 200 attempts × 25ms = 5s max contention. If lock
-cannot be acquired in that window, raises TimeoutError so the
-caller can decide whether to skip or retry at a higher level.
+cannot be acquired, raises TimeoutError so the caller can decide
+whether to skip or retry at a higher level.
 """
 import os
+import signal
 import time
 from contextlib import contextmanager
 
@@ -34,3 +38,18 @@ def file_lock(path: str, attempts: int = 200, sleep_s: float = 0.025):
             os.rmdir(lock_dir)
         except FileNotFoundError:
             pass
+
+
+@contextmanager
+def sigterm_guard():
+    """Defer SIGTERM until the critical section completes."""
+    try:
+        old = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    except (ValueError, OSError):
+        # Not in main thread or platform restriction — fall through
+        old = None
+    try:
+        yield
+    finally:
+        if old is not None:
+            signal.signal(signal.SIGTERM, old)

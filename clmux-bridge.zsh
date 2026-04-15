@@ -43,6 +43,11 @@ AGENT_NAME=$(basename "$INBOX" .json)
 
 wait_for_idle() {
   local elapsed=0
+  # Match within the last 8 non-empty lines so that multi-line prompts
+  # (gemini's prompt sits 4-5 lines above the bottom because of its
+  # workspace/branch/model status footer) are still detected, while
+  # avoiding the previous full-scrollback scan that false-matched on
+  # stale history.
   while (( elapsed < TIMEOUT )); do
     tmux capture-pane -t "$PANE_ID" -p | grep -v '^\s*$' | tail -8 | grep -qF "$IDLE_PATTERN" && return 0
     sleep 1
@@ -94,7 +99,10 @@ while true; do
   fi
   tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qx -- "$PANE_ID" || {
     echo "[clmux-bridge] pane $PANE_ID is gone, notifying lead..." >&2
-    python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME" 2>/dev/null
+    # Surface notify_shutdown errors to the bridge log instead of
+    # swallowing them. Previously a JSON parse error or disk-full
+    # failure here would silently leave the lead un-notified.
+    python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME"
     exit 0
   }
 
@@ -136,7 +144,7 @@ except: print('')
 " "$text" 2>/dev/null)
       [[ -n "$ts" ]] && mark_read "$ts"
       tmux kill-pane -t "$PANE_ID" 2>/dev/null
-      python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME" "$request_id" 2>/dev/null
+      python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME" "$request_id"
       exit 0   # cleanup trap calls deactivate_pane.py
     fi
 

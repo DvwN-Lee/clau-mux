@@ -1,7 +1,7 @@
 import json, sys, datetime, tempfile, os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _filelock import file_lock
+from _filelock import file_lock, sigterm_guard
 
 inbox_path, agent_name = sys.argv[1], sys.argv[2]
 request_id = sys.argv[3] if len(sys.argv) > 3 else None
@@ -44,7 +44,8 @@ with file_lock(outbox_path):
         else:
             msgs.pop(0)
     dir_ = os.path.dirname(os.path.abspath(outbox_path))
-    with tempfile.NamedTemporaryFile(mode='w', dir=dir_, delete=False, suffix='.tmp') as tf:
-        json.dump(msgs, tf, indent=2, ensure_ascii=False)
-        tmp_name = tf.name
-    os.replace(tmp_name, outbox_path)
+    with sigterm_guard():
+        with tempfile.NamedTemporaryFile(mode='w', dir=dir_, delete=False, suffix='.tmp') as tf:
+            json.dump(msgs, tf, indent=2, ensure_ascii=False)
+            tmp_name = tf.name
+        os.replace(tmp_name, outbox_path)

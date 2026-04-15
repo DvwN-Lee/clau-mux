@@ -77,6 +77,14 @@ echo "[clmux-bridge] started — pane:$PANE_ID  agent:$AGENT_NAME  idle:\"$IDLE_
 TEAM_DIR=$(dirname "$(dirname "$INBOX")")
 
 cleanup() {
+  # Skip all cleanup work if the team directory is already gone
+  # (external TeamDelete, manual rm, TeamCreate rebuild race). Nothing
+  # to clean up, nothing to notify, and calling the Python helpers
+  # would just generate noisy tracebacks.
+  if [[ ! -d "$TEAM_DIR" ]]; then
+    echo "[clmux-bridge] team dir gone, skipping cleanup" >&2
+    return 0
+  fi
   rm -f "$TEAM_DIR/.bridge-${AGENT_NAME}.env"
   rm -f "$TEAM_DIR/.${AGENT_NAME}-bridge.pid"
   rm -f "$TEAM_DIR/.${AGENT_NAME}-pane"
@@ -101,10 +109,14 @@ while true; do
   fi
   tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qx -- "$PANE_ID" || {
     echo "[clmux-bridge] pane $PANE_ID is gone, notifying lead..." >&2
-    # Surface notify_shutdown errors to the bridge log instead of
-    # swallowing them. Previously a JSON parse error or disk-full
-    # failure here would silently leave the lead un-notified.
-    python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME"
+    # Skip notify_shutdown if the team dir is already gone — there's
+    # no one to notify. notify_shutdown.py itself degrades gracefully,
+    # but short-circuiting here avoids even the silent stderr warning.
+    if [[ -d "$TEAM_DIR" ]]; then
+      python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME"
+    else
+      echo "[clmux-bridge] team dir gone, skipping lead notification" >&2
+    fi
     exit 0
   }
 

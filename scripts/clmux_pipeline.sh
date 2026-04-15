@@ -231,8 +231,15 @@ cmd_shutdown() {
     # Graceful path
     # -----------
 
+    # Capture pane list ONCE at the start. Reuse it for the C-c fallback so we
+    # don't re-query after the session may have self-destructed (which would
+    # produce stderr noise and a TOCTOU window).
+    local pane_list
+    pane_list=$(tmux list-panes -t "$name" -F '#{pane_id} #{pane_current_command}' 2>/dev/null || true)
+
     # Send appropriate exit signal to each pane
     while IFS=' ' read -r pane_id pane_cmd; do
+        [[ -z "$pane_id" ]] && continue
         case "$pane_cmd" in
             claude|node)
                 tmux send-keys -t "$pane_id" Escape 2>/dev/null || true
@@ -247,7 +254,7 @@ cmd_shutdown() {
                 tmux send-keys -t "$pane_id" C-d 2>/dev/null || true
                 ;;
         esac
-    done < <(tmux list-panes -t "$name" -F '#{pane_id} #{pane_current_command}' 2>/dev/null || true)
+    done <<< "$pane_list"
 
     # Wait loop — session may self-destruct once all shells exit
     local elapsed=0
@@ -256,12 +263,15 @@ cmd_shutdown() {
         (( elapsed++ )) || true
     done
 
-    # Still alive? Send C-c and wait 2 more seconds
+    # If session already gone, skip C-c fallback entirely
     if tmux has-session -t "$name" 2>/dev/null; then
+        # C-c fallback — reuse the captured pane_list (no re-query).
+        # Panes may no longer exist; send-keys failures are expected and tolerated.
         while IFS=' ' read -r pane_id _; do
+            [[ -z "$pane_id" ]] && continue
             tmux send-keys -t "$pane_id" C-c 2>/dev/null || true
             tmux send-keys -t "$pane_id" C-c 2>/dev/null || true
-        done < <(tmux list-panes -t "$name" -F '#{pane_id} #{pane_current_command}' 2>/dev/null || true)
+        done <<< "$pane_list"
         sleep 2
     fi
 

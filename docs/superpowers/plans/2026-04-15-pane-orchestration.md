@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Revision: v2 (2026-04-15 post-cross-review)** — amended per 4-reviewer cross-review (orch-plan-reviewer / gemini-reviewer / codex-worker / copilot-worker) + user-directed Corporate Hierarchy amendments (A1-A4). 18 amendments applied: 2 blocking (B1 `end_meeting` crash recovery, B2 notify test mock), 4 high (H1 envelope/index ordering, H2 atomic synthesis, H3 stale lock `--force` recovery, H4 lock content moved outside lock dir), 3 medium (M3 list type validation, M6 PermissionError wrapping, M7 mid-delegate documented), 4 corporate (A1 project_root field, A2 Master terminology, A3 Corporate Hierarchy Pattern docs, A4 `--project-root` CLI option), 5 copilot (PR split rationale, GH Actions workflow in PR C, README bullet, version 1.3.0 + CHANGELOG, `_filelock` hard-dep note). See **Phase 2 Roadmap** at the bottom for items intentionally deferred.
+**Revision: v3 (2026-04-15 second cross-review)** — two consecutive 4-reviewer cross-reviews (same `clau-mux-final-verify` team). See "Self-Review Notes → v2 addendum" for the first pass (18 amendments). **v3 addendum** adds 10 more amendments: **2 BLOCKING** (B1 `end_meeting` `copy2()`→`_atomic_copy_file()` for real atomic archive, B2 `SymlinkEscape` + `_safe_within_root()` guard on all write primitives), **4 HIGH** (H1 File Structure diagram updated to sibling `.meta.json`, H2 `release-master --force` registry drift demote fix, H3 `project_root` field removed — YAGNI, moved to Phase 2, H4 Phase 2 Roadmap reordered to promote `blocked`/`reply` to #1 + add `rebuild_thread_index` + per-session-Master + tree-vis), **3 MEDIUM** (M1 false "writability-verify test" claim corrected, M2 test count arithmetic fixed across 6 classes and step-level "Expected: N" annotations, M3 `post_envelope` "replay" language softened), **1 LOW** (L5 `test_cli_handover_transfers_master_role` added). Phase 2 Roadmap now has 13 entries with explicit sequencing.
 
 **Goal:** 기업형 개발 프로세스(Stage Gate + RACI)를 모방한 pane 간 계층적 위임 프로토콜 구현 — 단일 Master가 사용자와 대화하고, 필요 시 clmux-teams로 meeting을 소집하고, Sub pane에게 작업을 delegate하고, Sub의 report를 검증한 뒤 사용자 승인을 받는 구조. 모든 state가 파일 기반이라 pane 죽어도 resume 가능.
 
@@ -55,10 +55,10 @@
 **Directory scheme (생성 시점 on demand):**
 ```
 ~/.claude/orchestration/
-├── master.lock.d/           # mkdir mutex — Master 단일성
-│   └── content              # { pane_id, since, label }
-├── meeting.lock.d/          # mkdir mutex — 동시 meeting 금지
-│   └── content              # { meeting_id, topic, started_by, team_name }
+├── master.lock.d/           # mkdir mutex — Master 단일성 (빈 디렉토리)
+├── master.lock.meta.json    # sibling metadata { pane_id, since, label } — H4 amendment
+├── meeting.lock.d/          # mkdir mutex — 동시 meeting 금지 (빈 디렉토리)
+├── meeting.lock.meta.json   # sibling metadata { meeting_id, topic, started_by, team_name }
 ├── panes.json               # registry: { pane_id: {role, master_pane, label, registered_at, last_seen} }
 ├── threads/
 │   ├── <thread_id>.jsonl    # append-only: thread_meta + envelopes
@@ -252,18 +252,42 @@ class TestStorage:
 
     def test_atomic_json_write_roundtrip(self, tmp_path, monkeypatch):
         orch = _import_orch(monkeypatch, tmp_path)
-        target = tmp_path / "x" / "y.json"
+        orch.ensure_layout()
+        # [B2] target must be under orchestration root
+        target = orch.root() / "state" / "y.json"
         orch.atomic_json_write(target, {"a": 1, "b": [2, 3]})
         loaded = json.loads(target.read_text())
         assert loaded == {"a": 1, "b": [2, 3]}
         # parent dir auto-created
         assert target.parent.is_dir()
+
+    def test_safe_within_root_rejects_symlink_target(self, tmp_path, monkeypatch):
+        """[B2] writes through a symlink are refused with SymlinkEscape."""
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        victim = tmp_path / "victim.json"
+        victim.write_text("{}")
+        link = orch.root() / "state" / "attack.json"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(str(victim), str(link))
+        with pytest.raises(orch.SymlinkEscape):
+            orch.atomic_json_write(link, {"evil": True})
+        # victim unchanged
+        assert victim.read_text() == "{}"
+
+    def test_safe_within_root_rejects_path_outside_root(self, tmp_path, monkeypatch):
+        """[B2] writes to a path escaping root() are refused."""
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        outside = tmp_path / "outside" / "escape.json"
+        with pytest.raises(orch.SymlinkEscape):
+            orch.atomic_json_write(outside, {"escaped": True})
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/idongju/Desktop/Git/clau-mux && python3 -m pytest tests/test_orchestrate.py::TestStorage -v`
-Expected: All 7 tests FAIL with `ModuleNotFoundError: No module named '_orch'`.
+Expected: All 9 tests FAIL with `ModuleNotFoundError: No module named '_orch'`.
 
 - [ ] **Step 3: Implement storage primitives in `scripts/_orch.py`**
 
@@ -324,9 +348,44 @@ def _rand_id(prefix: str) -> str:
     return f"{prefix}-{secrets.token_hex(6)}"
 
 
-def atomic_json_write(path: Path, obj) -> None:
-    """Write JSON atomically via tempfile + os.replace. Parent auto-created."""
+class SymlinkEscape(RuntimeError):
+    """[B2] path escapes ~/.claude/orchestration/ via symlink or traversal."""
+
+
+def _safe_within_root(path: Path) -> Path:
+    """[B2] Validate that `path` (and every ancestor under root) stays under root().
+
+    Returns the resolved absolute path. Raises SymlinkEscape if:
+      - path itself is a symlink
+      - any ancestor under root() is a symlink that escapes
+      - resolved path is not under resolved root()
+
+    Call this BEFORE every open/write/replace under ~/.claude/orchestration/.
+    """
     path = Path(path)
+    if path.is_symlink():
+        raise SymlinkEscape(f"symlink not allowed: {path}")
+    root_resolved = root().resolve()
+    # Resolve parent (which must exist by the time we write); if path doesn't
+    # exist yet, resolve its longest existing ancestor instead.
+    probe = path
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    resolved = probe.resolve() if probe.exists() else path.parent.resolve()
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError:
+        raise SymlinkEscape(f"path escapes root: {path} -> {resolved}")
+    return path
+
+
+def atomic_json_write(path: Path, obj) -> None:
+    """Write JSON atomically via tempfile + os.replace. Parent auto-created.
+
+    [B2] Applies symlink defense: refuses to write through a symlink or to a
+    path that escapes root().
+    """
+    path = _safe_within_root(Path(path))
     path.parent.mkdir(parents=True, exist_ok=True)
     with sigterm_guard():
         with tempfile.NamedTemporaryFile(
@@ -339,7 +398,7 @@ def atomic_json_write(path: Path, obj) -> None:
 
 def append_thread(thread_id: str, record: dict) -> None:
     """Append a JSONL record to threads/<thread_id>.jsonl under file_lock."""
-    path = root() / "threads" / f"{thread_id}.jsonl"
+    path = _safe_within_root(root() / "threads" / f"{thread_id}.jsonl")
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, ensure_ascii=False) + "\n"
     with file_lock(str(path)):
@@ -368,7 +427,7 @@ def read_thread(thread_id: str) -> list:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/idongju/Desktop/Git/clau-mux && python3 -m pytest tests/test_orchestrate.py::TestStorage -v`
-Expected: All 7 tests PASS.
+Expected: All 9 tests PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -488,7 +547,7 @@ class TestEnvelope:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python3 -m pytest tests/test_orchestrate.py::TestEnvelope -v`
-Expected: 7 FAIL with `AttributeError: module '_orch' has no attribute 'make_envelope'`.
+Expected: 9 FAIL with `AttributeError: module '_orch' has no attribute 'make_envelope'`.
 
 - [ ] **Step 3: Add envelope section to `scripts/_orch.py`**
 
@@ -571,7 +630,7 @@ def validate_envelope(env: dict) -> None:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python3 -m pytest tests/test_orchestrate.py::TestEnvelope -v`
-Expected: 7 PASS.
+Expected: 9 PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -671,7 +730,7 @@ class TestMasterLock:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python3 -m pytest tests/test_orchestrate.py::TestMasterLock -v`
-Expected: 7 FAIL.
+Expected: 9 FAIL.
 
 - [ ] **Step 3: Add lock section to `scripts/_orch.py`**
 
@@ -861,7 +920,7 @@ def release_meeting(meeting_id: str, force: bool = False) -> None:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python3 -m pytest tests/test_orchestrate.py::TestMasterLock -v`
-Expected: 7 PASS.
+Expected: 9 PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -972,29 +1031,13 @@ class TestPanes:
         orch.ensure_layout()
         assert orch.list_panes() == {}
 
-    def test_register_pane_stores_project_root(self, tmp_path, monkeypatch):
-        """[A1] project_root field is persisted when provided."""
-        orch = _import_orch(monkeypatch, tmp_path)
-        orch.ensure_layout()
-        orch.register_pane("%128", role="sub", master="%105",
-                            label="exam-main",
-                            project_root="/Users/me/Project/exam-project")
-        entry = orch.list_panes()["%128"]
-        assert entry["project_root"] == "/Users/me/Project/exam-project"
-
-    def test_register_pane_without_project_root_omits_field(self, tmp_path, monkeypatch):
-        """[A1] project_root is optional — omitted pane has no key."""
-        orch = _import_orch(monkeypatch, tmp_path)
-        orch.ensure_layout()
-        orch.register_pane("%105", role="master", master=None)
-        entry = orch.list_panes()["%105"]
-        assert "project_root" not in entry
 ```
+
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python3 -m pytest tests/test_orchestrate.py::TestPanes -v`
-Expected: 4 FAIL.
+Expected: 3 FAIL.
 
 - [ ] **Step 3: Add panes section to `scripts/_orch.py`**
 
@@ -1019,14 +1062,12 @@ def list_panes() -> dict:
 
 
 def register_pane(pane_id: str, role: str, master: str | None = None,
-                  label: str = "", project_root: str | None = None) -> None:
+                  label: str = "") -> None:
     """Add or refresh a pane entry. last_seen always updates to now.
 
-    [A1 amendment per 2026-04-15 Corporate Hierarchy] `project_root` is an
-    optional absolute path identifying which project this pane belongs to.
-    Used for audit queries ("show all Subs working on /path/to/proj") and
-    for distinguishing a Desktop-level Master from Project-level Subs that
-    themselves delegate. Stored in panes.json as `project_root` field.
+    [v3 per 2026-04-15 cross-review] `project_root` field removed from Phase 1
+    (YAGNI — no query filter uses it yet). Deferred to Phase 2 Roadmap as part
+    of "Cross-project query filters".
     """
     ensure_layout()
     path = _panes_path()
@@ -1039,8 +1080,6 @@ def register_pane(pane_id: str, role: str, master: str | None = None,
             "label": label or entry.get("label", ""),
             "last_seen": _now_ts(),
         })
-        if project_root is not None:
-            entry["project_root"] = project_root
         if "registered_at" not in entry:
             entry["registered_at"] = entry["last_seen"]
         current[pane_id] = entry
@@ -1227,7 +1266,7 @@ class TestThread:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python3 -m pytest tests/test_orchestrate.py::TestThread -v`
-Expected: 8 FAIL.
+Expected: 9 FAIL.
 
 - [ ] **Step 3: Add thread section to `scripts/_orch.py`**
 
@@ -1324,14 +1363,19 @@ def post_envelope(env: dict) -> None:
     [H1 amendment per 2026-04-15 cross-review] Ordering:
       1. validate
       2. append_thread   ← JSONL is source of truth (audit log)
-      3. _apply_transition  ← index.json is cache, may lag
+      3. _apply_transition  ← index.json is a derived summary
 
     Rationale: if the process crashes between the two writes, a
     JSONL-first order leaves the log with a record that HAS NO
     corresponding index transition (rather than an index transition
-    with NO audit record). On recovery, the audit log can be replayed
-    to reconstruct correct index state. The reverse order loses the
-    causative envelope entirely — unrecoverable drift.
+    with NO audit record). On recovery, an operator can inspect the
+    JSONL audit log directly and reason about the correct index state.
+
+    [v3 per codex-reviewer] The phrase "index.json can be replayed to
+    reconstruct" was softened in this docstring because Phase 1 does
+    NOT ship an automated `rebuild_thread_index()` function. Recovery
+    is manual or via retry of the next valid transition. A programmatic
+    rebuild/repair path is queued in Phase 2 Roadmap (#5).
 
     read_thread() already skips corrupt/partial JSONL lines, so a
     half-written append is bounded damage.
@@ -1370,7 +1414,7 @@ def close_thread(tid: str, note: str = "") -> None:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python3 -m pytest tests/test_orchestrate.py::TestThread -v`
-Expected: 8 PASS.
+Expected: 9 PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1720,8 +1764,7 @@ Append at end:
 
 ```python
 # ─── meeting (lifecycle + WORM archive) ─────────────────────────────────────
-
-import shutil as _shutil   # avoid shadowing earlier `shutil` import
+# [B1 v3] _shutil no longer needed — use _atomic_copy_file helper above.
 
 
 def _teams_dir() -> Path:
@@ -1741,13 +1784,13 @@ def start_meeting(started_by: str, topic: str, team_name: str) -> str:
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
-    """[H2] Write text atomically via tempfile + os.replace.
+    """[H2] Write text atomically via tempfile + os.replace. [B2] symlink-safe.
 
     Required for any archive file that will later be chmodded to 0o444.
     A non-atomic write (write_text) plus chmod sequence can leave a
     partial file permanently read-only if the process crashes mid-write.
     """
-    path = Path(path)
+    path = _safe_within_root(Path(path))
     path.parent.mkdir(parents=True, exist_ok=True)
     with sigterm_guard():
         with tempfile.NamedTemporaryFile(
@@ -1757,6 +1800,33 @@ def _atomic_write_text(path: Path, text: str) -> None:
             tf.write(text)
             tmp_name = tf.name
         os.replace(tmp_name, path)
+
+
+def _atomic_copy_file(src: Path, dst: Path) -> None:
+    """[B1] Copy src → dst atomically: read bytes → tempfile in dst.parent → os.replace.
+
+    Replaces the v2 `shutil.copy2()` usage which is NOT atomic (copy2 writes
+    directly to dst and can leave a partial destination on crash). For
+    archive durability, use this helper instead. Preserves mtime.
+    [B2] symlink-safe for dst.
+    """
+    src = Path(src)
+    dst = _safe_within_root(Path(dst))
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    data = src.read_bytes()
+    stat = src.stat()
+    with sigterm_guard():
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=str(dst.parent), delete=False, suffix=".tmp"
+        ) as tf:
+            tf.write(data)
+            tmp_name = tf.name
+        os.replace(tmp_name, dst)
+    # Preserve mtime (best-effort; chmod 444 will happen later in phase 3)
+    try:
+        os.utime(dst, (stat.st_atime, stat.st_mtime))
+    except OSError:
+        pass
 
 
 def end_meeting(meeting_id: str, synthesis: str) -> None:
@@ -1770,12 +1840,16 @@ def end_meeting(meeting_id: str, synthesis: str) -> None:
         inboxes/        — per-member inbox snapshots
         synthesis.md    — master's written conclusion
 
-    [B1 amendment per 2026-04-15 cross-review] Redesigned ordering:
+    [B1 amendment per 2026-04-15 v3 cross-review] Redesigned ordering:
 
       Phase 1 — WRITE everything atomically (no chmod):
-        config.json, outbox.json, inboxes/*, metadata.json, synthesis.md
-        All writes use _atomic_write_text or _shutil.copy2 (already atomic
-        via rename on same filesystem).
+        config.json, outbox.json, inboxes/*, metadata.json, synthesis.md.
+        Every file write uses either `_atomic_write_text` (for generated
+        text) or `_atomic_copy_file` (for source-file archiving). The v2
+        draft used `shutil.copy2()` here, which is NOT atomic — copy2
+        writes directly to the destination, and a crash mid-copy leaves
+        a partial file. v3 replaces all copy2 calls with the temp+replace
+        helper so every archived file appears all-or-nothing.
 
       Phase 2 — VERIFY writability before chmod:
         Confirm all target files are still writable by our user (not
@@ -1787,7 +1861,8 @@ def end_meeting(meeting_id: str, synthesis: str) -> None:
       Phase 4 — RELEASE lock:
         Only after chmod succeeds. If crash occurs in phases 1-3, the
         lock is still held and retry is safe (all writes are atomic and
-        idempotent; chmod is idempotent).
+        idempotent — a retry simply re-atomic-replaces each file with
+        identical content; chmod is idempotent).
 
     Rationale: the previous design wrote synthesis non-atomically and
     intermixed chmod with writes. A crash after even one chmod 444 could
@@ -1808,17 +1883,18 @@ def end_meeting(meeting_id: str, synthesis: str) -> None:
     archive_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Phase 1: atomic writes ─────────────────────────────────────────
+    # [B1] Use _atomic_copy_file (temp + os.replace) — NOT shutil.copy2.
     cfg_src = team_dir / "config.json"
     cfg_dst = archive_dir / "config.json"
     if cfg_src.is_file():
-        _shutil.copy2(cfg_src, cfg_dst)  # shutil copy2 is atomic-rename-equivalent
+        _atomic_copy_file(cfg_src, cfg_dst)
     else:
         _atomic_write_text(cfg_dst, '{"warning":"source config missing"}')
 
     outbox_src = team_dir / "inboxes" / "team-lead.json"
     outbox_dst = archive_dir / "outbox.json"
     if outbox_src.is_file():
-        _shutil.copy2(outbox_src, outbox_dst)
+        _atomic_copy_file(outbox_src, outbox_dst)
     else:
         _atomic_write_text(outbox_dst, "[]")
 
@@ -1833,7 +1909,7 @@ def end_meeting(meeting_id: str, synthesis: str) -> None:
             if member_inbox.name == "team-lead.json":
                 continue
             dst = inboxes_dst / member_inbox.name
-            _shutil.copy2(member_inbox, dst)
+            _atomic_copy_file(member_inbox, dst)
             participants.append(member_inbox.stem)
             member_dsts.append(dst)
 
@@ -2066,29 +2142,35 @@ class TestCLI:
                     "meeting", "inbox", "thread", "panes", "resume"):
             assert sub in out
 
-    def test_cli_register_sub_accepts_project_root(self, tmp_path):
-        """[A4] --project-root records which worktree the Sub serves."""
-        self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
-        r = self._run(tmp_path, "register-sub",
-                      "--pane", "%128", "--master", "%105",
-                      "--label", "impl",
-                      "--project-root", "/tmp/worktrees/feat-x",
-                      "--json")
-        assert r.returncode == 0, r.stderr
-        r2 = self._run(tmp_path, "panes", "--json")
-        data = json.loads(r2.stdout)
-        assert data["%128"]["project_root"] == "/tmp/worktrees/feat-x"
-
     def test_cli_release_master_force_clears_stuck_lock(self, tmp_path):
         """[H3] --force bypasses ownership check (crash recovery)."""
         self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
         # Caller is a different pane; without --force this would fail
         r = self._run(tmp_path, "release-master", "--pane", "%999", "--force", "--json")
         assert r.returncode == 0, r.stderr
+        # [H2 v3] panes.json master entry demoted after force-release
         r2 = self._run(tmp_path, "panes", "--json")
-        # Master entry cleared (or release recorded with force flag)
+        data = json.loads(r2.stdout)
+        # Former master %105 either gone or role != "master"
+        assert data.get("%105", {}).get("role") != "master"
         out = json.loads(r.stdout)
         assert out["force"] is True
+
+    def test_cli_handover_transfers_master_role(self, tmp_path):
+        """[L-5 v3] handover CLI subcommand walks Master role to another pane."""
+        self._run(tmp_path, "set-master", "--pane", "%105", "--label", "desktop")
+        r = self._run(tmp_path, "handover",
+                      "--from", "%105", "--to", "%128",
+                      "--label", "project",
+                      "--json")
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["master"]["pane_id"] == "%128"
+        # panes.json reflects the new master; %105 is no longer master
+        r2 = self._run(tmp_path, "panes", "--json")
+        data = json.loads(r2.stdout)
+        assert data["%128"]["role"] == "master"
+        assert data.get("%105", {}).get("role") != "master"
 
     def test_cli_set_master_and_current_master(self, tmp_path):
         r1 = self._run(tmp_path, "set-master", "--pane", "%105", "--label", "main")
@@ -2143,7 +2225,7 @@ class TestCLI:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python3 -m pytest tests/test_orchestrate.py::TestCLI -v`
-Expected: 6 FAIL with "No such file or directory: scripts/clmux_orchestrate.py".
+Expected: 7 FAIL with "No such file or directory: scripts/clmux_orchestrate.py".
 
 - [ ] **Step 3: Implement `scripts/clmux_orchestrate.py`**
 
@@ -2206,17 +2288,35 @@ def cmd_handover(args):
 
 def cmd_release_master(args):
     # [H3] --force lets operators clear a stuck lock after crash recovery
+    # [H2 v3] after successful release, demote any pane currently holding
+    # the master role in panes.json — prevents registry drift where the
+    # lock is cleared but the registry still lists the dead pane as Master.
+    prior_master = _orch.current_master() or {}
+    prior_pane = (prior_master or {}).get("pane_id")
     _orch.release_master(args.pane, force=bool(args.force))
-    _emit({"released": args.pane, "force": bool(args.force)}, args.json)
+    if prior_pane:
+        panes = _orch.list_panes()
+        if prior_pane in panes and panes[prior_pane].get("role") == "master":
+            # Re-register as "former" (keeps audit trail) — or unregister if
+            # the caller is %999-style synthetic recovery.
+            _orch.register_pane(
+                prior_pane, role="former_master",
+                master=None,
+                label=panes[prior_pane].get("label", "") + " (released)",
+            )
+            panes = _orch.list_panes()
+            panes[prior_pane]["stale_master_released_at"] = _orch._now_ts()
+            _orch.atomic_json_write(_orch._panes_path(), panes)
+    _emit({"released": args.pane, "force": bool(args.force),
+           "prior_master_demoted": prior_pane}, args.json)
 
 
 def cmd_register_sub(args):
-    # [A4] project_root is optional — records which worktree this Sub serves
     _orch.register_pane(
         args.pane, role="sub", master=args.master,
-        label=args.label or "", project_root=args.project_root,
+        label=args.label or "",
     )
-    _emit({"registered": args.pane, "project_root": args.project_root}, args.json)
+    _emit({"registered": args.pane}, args.json)
 
 
 def cmd_delegate(args):
@@ -2370,8 +2470,6 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--pane", required=True)
     sp.add_argument("--master", required=True)
     sp.add_argument("--label")
-    sp.add_argument("--project-root", dest="project_root",
-                    help="[A4] worktree path this Sub serves (Corporate Hierarchy 'Squad')")
     sp.set_defaults(func=cmd_register_sub)
 
     # Thread lifecycle
@@ -2445,12 +2543,12 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run CLI tests**
 
 Run: `python3 -m pytest tests/test_orchestrate.py::TestCLI -v`
-Expected: 6 PASS.
+Expected: 7 PASS.
 
 - [ ] **Step 5: Run full test suite**
 
 Run: `python3 -m pytest tests/test_orchestrate.py -v`
-Expected: ~61 tests PASS (Storage 7 + Envelope 8 + MasterLock 8 + MeetingLock 5 + Panes 5 + Thread 9 + Inbox 4 + Notify 2 + Meeting 5 + Resume 4 + CLI 8 = 65). Count grows modestly in v2 due to new list-validation, `force=True`, project_root, and H1 ordering tests.
+Expected: 65 tests PASS (Storage 9 + Envelope 9 + MasterLock 9 + MeetingLock 4 + Panes 4 + Thread 9 + Inbox 4 + Notify 2 + Meeting 4 + Resume 4 + CLI 7 = 65). v3 breakdown reflects (a) v2's M3 list-validation + H3 force-release + H1 ordering tests; (b) v3's B2 symlink defense tests (+2 TestStorage); (c) v3's H1 project_root removal (-2 TestPanes, -1 TestCLI) offset by v3's L-5 handover CLI test (+1 TestCLI).
 
 - [ ] **Step 6: Commit**
 
@@ -2654,11 +2752,14 @@ The protocol enforces *one Master at a time* but doesn't prescribe *where* the M
 
 ```
 Desktop / Top-level          ← Master (pane %105)      — user-facing, highest strategic view
-  └─ Project "clau-mux"/     ← Sub (pane %128)         — registered with --project-root $REPO_ROOT
-       └─ Worktree "feat-x"/ ← Sub-Sub / "Squad" (%200) — registered with --project-root $WORKTREE
+  └─ Project "clau-mux"/     ← Sub (pane %128)         — labeled "clau-mux-main"
+       └─ Worktree "feat-x"/ ← Sub-Sub / "Squad" (%200) — labeled "clau-mux-feat-x"
        └─ Worktree "feat-y"/ ← Sub-Sub / "Squad" (%240)
   └─ Project "other-repo"/   ← Sub (pane %160)
 ```
+
+> **[v3 per 2026-04-15 cross-review] `--project-root` deferred to Phase 2.**
+> An earlier draft carried `register-sub --project-root $WORKTREE` and stored it in `panes.json`. This field was YAGNI for Phase 1 (no query path consumed it) and has been moved to Phase 2 Roadmap ("Cross-project query filters") — until that filter exists, use the `--label` field to identify which worktree a Sub serves.
 
 **Master transfer (handover) walk-down.** If the user moves focus to a project-level pane and wants it to become the new Master, run:
 
@@ -2666,16 +2767,17 @@ Desktop / Top-level          ← Master (pane %105)      — user-facing, highes
 clmux-orchestrate handover --from %105 --to %128 --label clau-mux-main
 ```
 
-This is an atomic swap: `%105` loses Master role, `%128` gains it, and the lock record is updated. In-flight threads delegated from `%105` remain open — the new Master can `thread --id <tid>` to review them and either `accept`/`reject` or `close` with note "handover cleanup".
+This is an atomic swap: `%105` loses Master role, `%128` gains it, and the lock record is updated. In-flight threads delegated from `%105` remain open — the new Master can `thread --id <tid>` to review them and either `accept`/`reject` or `close` with note "handover cleanup". The former Master is **not automatically demoted to Sub** — the protocol leaves that as a user decision (the pane may be exiting entirely, or it may want to act as a Sub under the new Master with a fresh `register-sub`).
 
 **Why this pattern.**
-- Each worktree becomes a "Squad" with its own registered Sub pane, so `panes.json` carries `project_root` (A4) — later queries can filter "all in-flight threads assigned to panes in worktree X" when diagnosing workflow leaks across worktrees.
+- A consistent labeling convention (`label=$WORKTREE_BASENAME`) lets operators distinguish at a glance which Sub serves which worktree; later Phase 2 filters can use the label prefix.
 - Recursion is unbounded by design (Sub-Subs are just Subs with a `parent_thread_id`), so deeper hierarchies (org → department → squad → task-force) are representable without protocol changes.
 - The global Master lock prevents two panes from *both* thinking they're the top of the hierarchy. Conflicts surface immediately instead of corrupting shared `threads/index.json`.
 
 **When NOT to use this pattern.**
 - Single-worktree short-lived sessions: just use one Master pane, skip Sub registration entirely.
 - Cross-machine work: `~/.claude/orchestration/` is machine-local. Use separate Masters on separate machines; no attempt at distributed consensus.
+- Long-running parallel workflows on unrelated projects — the global Master lock will serialize you; consider two OS users or two machines. (Phase 2 Roadmap "Master per tmux session" will address this.)
 
 ## Directory layout
 
@@ -2806,7 +2908,6 @@ If stronger guarantees are needed in Phase 2, options include: (1) signed conten
 - **Meeting lock stuck after crash.** Same failure mode for meetings. Recovery: `clmux-orchestrate meeting release --meeting-id <id> --force`.
 - **Tmux paste-buffer is best-effort.** If tmux is unavailable, `notify_pane` silently returns False; the alert is still recorded in `inbox/<pane>.jsonl` and can be pulled with `clmux-orchestrate inbox --pane <pane>`.
 - **Mid-delegate crash — alert paste not retried.** If Master crashes between JSONL durability and tmux paste, the inbox record exists but the Sub pane never flashed. `resume_pane` surfaces the pending alert, but a human must inspect it. Phase 2: auto-replay unpasted alerts on resume.
-- **`project_root` is advisory only.** Recorded for operator tooling and future filtering; protocol does not enforce that a Sub with `project_root=/a/b` only operates on files under `/a/b`.
 - **No schema versioning.** Envelopes don't carry a `schema_version`. Adding new required body fields will break validation of old records on replay. Phase 2: add `version` field and compat shim.
 - **Cross-project / cross-machine** — `~/.claude/orchestration/` is global to one machine and one HOME. No distributed coordination.
 - **Single Master globally.** This is by design (prevents split-brain). If you need two concurrent Masters for two independent workflows, run them under two OS users (two HOMEs) or on two machines.
@@ -2957,7 +3058,7 @@ Implements Phase 1 of the pane orchestration protocol (see docs/orchestration.md
 - Enterprise stage-gate alignment
 
 ## Tests
-- Unit: tests/test_orchestrate.py (~57 tests)
+- Unit: tests/test_orchestrate.py (65 tests)
 - Integration: tests/test_orchestrate_integration.sh (end-to-end)
 
 ## Known limitations
@@ -2970,22 +3071,27 @@ EOF
 
 ## Phase 2 Roadmap
 
-Explicit non-goals for Phase 1, queued for Phase 2 prioritization:
+Explicit non-goals for Phase 1, queued for Phase 2 prioritization.
 
-| Item | Motivation | Estimated Scope |
-|---|---|---|
-| `blocked` / `reply` state machine | Sub formally asks Master a question and blocks; Master replies, Sub resumes. Removes the out-of-band channel dependency. | +2 envelope kinds, +2 state transitions, +~8 tests |
-| Mid-delegate alert auto-replay | On `resume_pane(master)`, detect CREATED threads whose inbox entry has no `notified_at` and re-paste. Closes the M7 gap. | +`notified_at` field, +replay logic, +2 tests |
-| Meeting audit CLI | `meeting list` / `meeting show <id>` subcommands; optionally `meeting search --topic <pattern>`. | +3 CLI subcommands, +3 tests |
-| Cascade cancel | On `reject` of a parent thread, auto-emit `reject` to direct child threads (opt-in via flag). | +recursive traversal, +3 tests |
-| Progress heartbeat + stale-Sub detection | Sub emits `progress_heartbeat` every N minutes; Master detects absence and surfaces in `resume_pane` / `panes --stale`. | +kind + timer + query, +4 tests |
-| Master stale auto-takeover | Automate `release-master --force` via pane-liveness check (tmux `has-pane`). Removes manual cleanup for most crashes. | +liveness probe + `master claim --if-stale`, +3 tests |
-| Schema versioning | Add `schema_version` to envelope root; add compat shim for reading older records. | +1 field, +shim, +2 tests |
-| Claude Code slash / skill integration | `/orch` slash command and a `clmux-orchestration` skill entry to guide Masters through claim/delegate/close flows. | +skill manifest, +slash handler |
-| Stronger WORM (optional) | macOS `chflags uchg` on archive + optional signed hashes in index. | +platform probe, +hash field |
-| Cross-project query filters | `panes --project-root <path>`, `thread --project-root <path>` for auditing worktree-scoped work. | +CLI filter, +2 tests |
+**[v3 per gemini-reviewer]** `blocked`/`reply` is the highest-impact gap in Phase 1 — delegation's most common real-world operation is a question, and without it Phase 1 audit trails go dark as soon as clarification is needed. It is listed first below and should lead Phase 2.
 
-Sequencing suggestion: `blocked/reply` first (unblocks bidirectional flow), then mid-delegate replay + stale-Master auto-takeover (crash hardening), then meeting audit + cascade cancel (operator ergonomics), then schema versioning (precondition for any breaking change to envelope body shape).
+| # | Item | Motivation | Estimated Scope |
+|---|---|---|---|
+| 1 | **`blocked` / `reply` state machine** (priority) | Sub formally asks Master a question and blocks; Master replies, Sub resumes. Removes the out-of-band channel dependency. **Gemini-reviewer identified as Phase-1 gap with biggest UX impact.** | +2 envelope kinds, +2 state transitions, +~8 tests |
+| 2 | Cross-project query filters + `project_root` field | `register-sub --project-root <path>` + `panes --project-root <p>` + `thread --project-root <p>` for auditing worktree-scoped work. Field was drafted in v2, deferred in v3 because no consumer existed; re-add here **with** the consumer. | +field, +CLI flag, +3 CLI filter commands, +4 tests |
+| 3 | Mid-delegate alert auto-replay | On `resume_pane(master)`, detect CREATED threads whose inbox entry has no `notified_at` and re-paste. Closes the M7 gap. | +`notified_at` field, +replay logic, +2 tests |
+| 4 | Master stale auto-takeover | Automate `release-master --force` via pane-liveness check (tmux `has-pane`). Removes manual cleanup for most crashes. | +liveness probe + `master claim --if-stale`, +3 tests |
+| 5 | `rebuild_thread_index()` / `resume_repair_index()` | Audit-log-based rebuild of `threads/index.json` when it diverges from JSONL. Makes the "log is source of truth, index is cache" invariant real. **Codex-reviewer flagged this as implicit promise in v2 H1.** | +rebuild fn, +recovery CLI, +3 tests |
+| 6 | Meeting audit CLI | `meeting list` / `meeting show <id>` subcommands; optionally `meeting search --topic <pattern>`. | +3 CLI subcommands, +3 tests |
+| 7 | Cascade cancel | On `reject` of a parent thread, auto-emit `reject` to direct child threads (opt-in via flag). | +recursive traversal, +3 tests |
+| 8 | Progress heartbeat + stale-Sub detection | Sub emits `progress_heartbeat` every N minutes; Master detects absence and surfaces in `resume_pane` / `panes --stale`. | +kind + timer + query, +4 tests |
+| 9 | Schema versioning | Add `schema_version` to envelope root; add compat shim for reading older records. | +1 field, +shim, +2 tests |
+| 10 | Claude Code slash / skill integration | `/orch` slash command and a `clmux-orchestration` skill entry to guide Masters through claim/delegate/close flows. | +skill manifest, +slash handler |
+| 11 | Stronger WORM (optional) | macOS `chflags uchg` + optional signed hashes in index. Linux `chattr +i` is ext-specific; fall back to chmod. | +platform probe, +hash field |
+| 12 | Master per tmux session (optional scope-narrowing) | Replace global singular Master with per-tmux-session singular (parse `$TMUX_SOCKET` for scope). Unblocks parallel work on unrelated projects. **Gemini-reviewer L-1.** | +scope detection, +lock path per session, +4 tests |
+| 13 | Tree visualization for nested delegation | `thread --tree --id <root>` traverses `parent_thread_id` and renders an ascii tree. **Gemini-reviewer follow-up.** | +traversal, +render, +2 tests |
+
+**Sequencing suggestion:** (#1) `blocked/reply` first — highest user value. Then (#5) `rebuild_thread_index` to make the durability story real. Then (#2) cross-project filters once cumulative label conventions reveal what users actually want to filter on. Then crash hardening (#3, #4), then audit ergonomics (#6, #7, #8), then schema versioning (#9, precondition for any breaking envelope change), then polish (#10, #11, #12, #13).
 
 ---
 
@@ -3045,12 +3151,43 @@ Applied after 4-reviewer cross-review on `clau-mux-final-verify` team (Claude So
 - GH Actions workflow stub `.github/workflows/orchestrate.yml` running unit tests + integration (Task 15 Step 3).
 - Phase 2 Roadmap section (above) with 10 explicit Phase-2 candidates and sequencing suggestion.
 
-**Test count update:** v1 projected ~57 tests; v2 projects ~65 (Envelope +1 list-validation, MasterLock +1 force-release, MeetingLock +1 force-release, Panes +1 project_root, Thread +1 H1 ordering, Meeting +1 writability-verify, CLI +2 register-sub-project-root + release-master-force). Growth is localized to amendment scope; no scope creep.
+**Test count update:** v1 projected ~57 tests; v2 targets 65 (Envelope +1 list-validation, MasterLock +1 force-release, MeetingLock +1 force-release, Panes +1 project_root, Thread +1 H1 ordering, CLI +2 register-sub-project-root + release-master-force). Growth is localized to amendment scope; no scope creep.
+
+> **v3 correction (2026-04-15 later):** v2 addendum originally claimed "+1 writability-verify test in Meeting" — that test was **not actually written**. The 4-phase end_meeting code has the writability-verify phase (Phase 2) but lacks a dedicated unit test exercising the restore path. This is tracked as a gap in the v3 addendum below; the phase is still implemented, just not unit-tested in isolation. An integration-level exercise remains in Task 13.
 
 **Not applied (and why):**
 - Suggested "replace mkdir-mutex with fcntl" — scope creep; mkdir-mutex works reliably on the macOS + Linux filesystems we target, and `_filelock.py` is already battle-tested via the bridge work. Revisit if Phase 2 reveals a real contention issue.
 - Suggested "add JSON-schema validation via jsonschema library" — adds a dependency for marginal benefit over the hand-rolled `validate_envelope`. Revisit if the envelope surface grows beyond 10 kinds.
 - Suggested "move `~/.claude/orchestration/` to project-local" — conflicts with the "single Master globally" invariant. Would require redesign of the lock scope. Left in Phase 2 Roadmap as "Cross-project query filters" which achieves the user-visible goal without breaking singularity.
+
+### v3 addendum (second cross-review — correctness/security + framer)
+
+Applied after a second 4-reviewer cross-review on `clau-mux-final-verify` (same team as v2) which raised 2 BLOCKING issues and several HIGH/MEDIUM concerns that v2 missed. Amendments:
+
+**Blocking (2) — applied:**
+- **B1 end_meeting copy2 atomicity** (codex-worker): replaced `shutil.copy2()` in `end_meeting` with `_atomic_copy_file()` helper (read bytes → tempfile in dst.parent → `os.replace`). `shutil.copy2()` is NOT atomic — it writes directly to the destination and can leave a partial file on crash. Docstring corrected to remove the "atomic via rename" claim. The entire Phase 1 archive is now genuinely all-or-nothing per file.
+- **B2 symlink defense** (codex-worker): added `SymlinkEscape` + `_safe_within_root()` helper and applied to every write primitive (`atomic_json_write`, `append_thread`, `_atomic_write_text`, `_atomic_copy_file`). Refuses to write through a symlink or to a path whose resolved ancestor escapes `~/.claude/orchestration/`. New tests (TestStorage +2): `test_safe_within_root_rejects_symlink_target`, `test_safe_within_root_rejects_path_outside_root`. Kept read paths unrestricted for Phase 1 — read surface is smaller and changing them might break the resume inspection flow; revisit in Phase 2 if threat model tightens.
+
+**High (4) — applied:**
+- **H1 File Structure diagram** (codex + Claude plan-reviewer): the File Structure diagram in the plan header still showed `master.lock.d/└── content` style from v1. Updated to show sibling `master.lock.meta.json` / `meeting.lock.meta.json` reflecting the H4 amendment actually implemented in Task 3.
+- **H2 release-master registry drift** (codex-worker): `cmd_release_master` now demotes the prior master's `panes.json` entry to `role="former_master"` with a `stale_master_released_at` audit marker after successful `release_master(force=True)`. This prevents the post-crash state where the lock is cleared but the registry still lists a dead pane as Master. Updated `test_cli_release_master_force_clears_stuck_lock` to assert `data["%105"]["role"] != "master"`.
+- **H3 project_root removed from Phase 1** (gemini-reviewer YAGNI): Phase 1 had no consumer for the field — no query or filter used it. Removed from `register_pane` signature, `register-sub --project-root` CLI arg, Corporate Hierarchy Pattern section, and bottom Known Limitations. Moved to Phase 2 Roadmap as "Cross-project query filters + project_root field" (#2). Corporate Hierarchy Pattern docs now use `--label` for worktree identification.
+- **H4 Phase 2 Roadmap reordered** (gemini-reviewer): `blocked`/`reply` state machine promoted to #1 (highest user value — bidirectional delegation). Added `rebuild_thread_index()` (#5, codex-flagged), "Master per tmux session" (#12, gemini-flagged), tree visualization (#13, gemini-flagged). Updated sequencing suggestion.
+
+**Medium (3) — applied:**
+- **M1 false "writability-verify test" claim**: corrected v2 addendum — the test was never written. Phase 2 of `end_meeting` code still exists; just no isolated unit test. Integration coverage remains via Task 13.
+- **M2 test count arithmetic**: fixed six per-class breakdowns that had wrong numbers (Envelope 8→9, MasterLock 8→9, MeetingLock 5→4, Panes 5→4, Meeting 5→4, CLI 8→7); fixed the "~61 tests PASS" that preceded a 65 breakdown; fixed the PR template's "~57 tests". All step-level "Expected: N FAIL/PASS" counts updated to match actual class sizes after v3 add/remove.
+- **M3 "replay" language softened**: `post_envelope` docstring no longer claims JSONL "can be replayed to reconstruct correct index state" — Phase 1 has no automated replay; rebuild is deferred to Phase 2 Roadmap #5. Docstring now says "operator can inspect the JSONL audit log directly and reason about the correct index state."
+
+**Low (1) — applied:**
+- **L5 handover CLI test** (Claude plan-reviewer): added `test_cli_handover_transfers_master_role` to TestCLI. Covers the Corporate Hierarchy walk-down flow end-to-end through the CLI (was previously only library-level tested via `test_handover_master_transfers_role`).
+
+**Not applied (and why):**
+- Gemini's "add `blocked`/`reply` to Phase 1" — scope expansion would add +2 envelope kinds + 2 state transitions + ~8 tests, pushing Phase 1 past the size where a single PR is reviewable. Kept as #1 in Phase 2 Roadmap with explicit "Phase 1 gap" framing. Lead's assessment: if Phase 1 merge leads to real operational pain from the gap, promote to emergency Phase 1.5 rather than bundling pre-merge.
+- Gemini's "Master per tmux session" — retains global singular for v3; the scope-narrowing is queued at Phase 2 #12. Reason: the global lock is the cleanest way to force users to notice they have two unrelated workflows competing for coordination; narrowing to per-session silently enables a footgun where two Masters could spawn Sub-Subs that write to the same `panes.json`. Keep pressure on the single-Master model until we have more operational data.
+- Codex's "extend symlink defense to read paths" — left for Phase 2. Read-side compromise reveals state but can't corrupt it, and closing it now risks breaking resume inspection which we actively need working. If threat model tightens (e.g., shared-home lab environment), revisit.
+
+**Test count update (v3):** 65 tests total (Storage +2 symlink, Panes −2 project_root, CLI −1 project_root +1 handover). Same total as v2 claimed but with a corrected breakdown.
 
 ---
 
@@ -3066,7 +3203,7 @@ Out of scope in this PR; candidates for Phase 2:
 - **Mid-delegate crash alert replay** — if Master crashes between JSONL durability and tmux paste, Sub inbox has the record but pane never flashed. `resume_pane` surfaces it; auto-replay queued for Phase 2.
 - **WORM semantics are advisory** — `chmod 0o444` prevents accidental overwrite, not determined tampering. See `docs/orchestration.md` "WORM semantics — reality check".
 - **Claude Code slash command / skill integration** — no `/orch` slash command yet. Invoke CLI directly.
-- **Cross-project audit** — `~/.claude/orchestration/` is global; `panes.json` records `project_root` per Sub (v2 addition) but there's no CLI filter yet.
+- **Cross-project audit** — `~/.claude/orchestration/` is global; no per-project filter. Phase 2 will add `project_root` field + query filter together.
 - **Schema versioning** — envelopes don't carry a version field. Adding new required body fields will break validation of old records on replay.
 - **Single Master globally (by design)** — no distributed coordination; two concurrent top-level Masters require two OS users or two machines.
 

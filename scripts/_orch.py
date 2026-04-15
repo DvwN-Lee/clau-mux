@@ -862,3 +862,50 @@ def end_meeting(meeting_id: str, synthesis: str) -> None:
 
     # ── Phase 4: release lock (only after archive is durable + immutable)
     release_meeting(meeting_id)
+
+
+# ─── resume ─────────────────────────────────────────────────────────────────
+
+_IN_FLIGHT_STATES = {"CREATED", "IN_PROGRESS", "REPORTED"}
+
+
+def _state_path(pane_id: str) -> Path:
+    return root() / "state" / f"{pane_id}.json"
+
+
+def resume_pane(pane_id: str) -> dict:
+    """Rebuild a pane's in-flight state from persistent stores.
+
+    Collects:
+      - role (from panes.json)
+      - in_flight_threads: threads where this pane is delegator or assignee
+        AND state is not CLOSED/ACCEPTED
+      - pending_alerts: current inbox contents
+
+    Persists a snapshot at state/<pane_id>.json for audit.
+    """
+    ensure_layout()
+    panes = list_panes()
+    entry = panes.get(pane_id, {})
+    role = entry.get("role")
+    master = entry.get("master_pane")
+
+    idx = read_thread_index()
+    in_flight = [
+        tid for tid, meta in idx.items()
+        if meta["state"] in _IN_FLIGHT_STATES
+        and (meta["delegator"] == pane_id or meta["assignee"] == pane_id)
+    ]
+
+    pending = read_inbox(pane_id)
+
+    state = {
+        "pane_id": pane_id,
+        "role": role,
+        "master": master,
+        "in_flight_threads": in_flight,
+        "pending_alerts": pending,
+        "last_resume_at": _now_ts(),
+    }
+    atomic_json_write(_state_path(pane_id), state)
+    return state

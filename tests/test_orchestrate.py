@@ -643,3 +643,64 @@ class TestMeeting:
         orch.ensure_layout()
         with pytest.raises(orch.MeetingLockError, match="no active meeting"):
             orch.end_meeting("m-nonexistent", synthesis="")
+
+
+class TestResume:
+    def test_resume_pane_with_no_history_returns_empty(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        state = orch.resume_pane("%105")
+        assert state["pane_id"] == "%105"
+        assert state["role"] is None
+        assert state["in_flight_threads"] == []
+        assert state["pending_alerts"] == []
+
+    def test_resume_pane_detects_in_flight_threads_as_master(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.register_pane("%105", role="master", master=None, label="main")
+        # Open two threads: one IN_PROGRESS, one CLOSED
+        t1 = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        t2 = orch.open_thread(delegator="%105", assignee="%200", parent_thread_id=None)
+        orch.post_envelope(orch.make_envelope(
+            thread_id=t1, from_="%105", to="%128", kind="delegate",
+            body={"scope":"x","success_criteria":"y"}))
+        orch.post_envelope(orch.make_envelope(
+            thread_id=t1, from_="%128", to="%105", kind="ack", body={}))
+        # t2 completes
+        orch.post_envelope(orch.make_envelope(
+            thread_id=t2, from_="%105", to="%200", kind="delegate",
+            body={"scope":"x","success_criteria":"y"}))
+        orch.post_envelope(orch.make_envelope(
+            thread_id=t2, from_="%200", to="%105", kind="ack", body={}))
+        orch.post_envelope(orch.make_envelope(
+            thread_id=t2, from_="%200", to="%105", kind="report",
+            body={"summary":"done","evidence":["x"]}))
+        orch.post_envelope(orch.make_envelope(
+            thread_id=t2, from_="%105", to="%200", kind="accept", body={}))
+        orch.close_thread(t2, note="approved")
+
+        state = orch.resume_pane("%105")
+        assert state["role"] == "master"
+        # Only t1 is in-flight (t2 is CLOSED)
+        assert t1 in state["in_flight_threads"]
+        assert t2 not in state["in_flight_threads"]
+
+    def test_resume_pane_surfaces_pending_alerts(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.register_pane("%128", role="sub", master="%105")
+        orch.add_inbox_alert("%128", {"thread_id": "t-xxx", "kind": "delegate"})
+        state = orch.resume_pane("%128")
+        assert len(state["pending_alerts"]) == 1
+
+    def test_resume_pane_updates_state_file(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.register_pane("%105", role="master", master=None)
+        orch.resume_pane("%105")
+        state_file = tmp_path / ".claude" / "orchestration" / "state" / "%105.json"
+        assert state_file.is_file()
+        persisted = json.loads(state_file.read_text())
+        assert persisted["pane_id"] == "%105"
+        assert "last_resume_at" in persisted

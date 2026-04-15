@@ -43,6 +43,11 @@ AGENT_NAME=$(basename "$INBOX" .json)
 
 wait_for_idle() {
   local elapsed=0
+  # Match within the last 8 non-empty lines so that multi-line prompts
+  # (gemini's prompt sits 4-5 lines above the bottom because of its
+  # workspace/branch/model status footer) are still detected, while
+  # avoiding the previous full-scrollback scan that false-matched on
+  # stale history.
   while (( elapsed < TIMEOUT )); do
     tmux capture-pane -t "$PANE_ID" -p | grep -v '^\s*$' | tail -8 | grep -qF "$IDLE_PATTERN" && return 0
     sleep 1
@@ -64,20 +69,28 @@ mark_read() {
 
 echo "[clmux-bridge] started — pane:$PANE_ID  agent:$AGENT_NAME  idle:\"$IDLE_PATTERN\""
 
-wait_for_idle || { echo "[clmux-bridge] error: CLI not ready (pattern: $IDLE_PATTERN)" >&2; exit 1; }
-echo "[clmux-bridge] ready — polling inbox every 2s (Ctrl+C to stop)"
-
+# Trap MUST be set before wait_for_idle: an early `exit 1` from a failed
+# initial idle-wait would otherwise skip cleanup and leave config.json with
+# isActive:true (Ghost Agent) and orphan marker files.
 TEAM_DIR=$(dirname "$(dirname "$INBOX")")
 
 cleanup() {
   rm -f "$TEAM_DIR/.bridge-${AGENT_NAME}.env"
   rm -f "$TEAM_DIR/.${AGENT_NAME}-bridge.pid"
   rm -f "$TEAM_DIR/.${AGENT_NAME}-pane"
+  python3 "$CLMUX_DIR/scripts/deactivate_pane.py" "$TEAM_DIR" "$AGENT_NAME" 2>/dev/null
+  # Invariant: queue lifecycle = agent session lifecycle. On any exit,
+  # discard remaining messages so the next spawn starts from a clean queue.
+  python3 "$CLMUX_DIR/scripts/purge_inbox.py" "$INBOX" 2>/dev/null
   echo "[clmux-bridge] shutting down"
 }
 trap 'cleanup; exit 0' INT TERM EXIT
 
+wait_for_idle || { echo "[clmux-bridge] error: CLI not ready (pattern: $IDLE_PATTERN)" >&2; exit 1; }
+echo "[clmux-bridge] ready — polling inbox every 2s (Ctrl+C to stop)"
+
 _defer_count=0
+_paste_fail_count=0
 while true; do
   if ! command -v tmux &>/dev/null; then
     echo "[clmux-bridge] error: tmux not in PATH, retrying..." >&2
@@ -86,7 +99,10 @@ while true; do
   fi
   tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qx -- "$PANE_ID" || {
     echo "[clmux-bridge] pane $PANE_ID is gone, notifying lead..." >&2
-    python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME" 2>/dev/null
+    # Surface notify_shutdown errors to the bridge log instead of
+    # swallowing them. Previously a JSON parse error or disk-full
+    # failure here would silently leave the lead un-notified.
+    python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME"
     exit 0
   }
 
@@ -128,22 +144,23 @@ except: print('')
 " "$text" 2>/dev/null)
       [[ -n "$ts" ]] && mark_read "$ts"
       tmux kill-pane -t "$PANE_ID" 2>/dev/null
-      python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME" "$request_id" 2>/dev/null
-      python3 "$CLMUX_DIR/scripts/deactivate_pane.py" "$TEAM_DIR" "$AGENT_NAME" 2>/dev/null
-      exit 0
+      python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME" "$request_id"
+      exit 0   # cleanup trap calls deactivate_pane.py
     fi
 
     if ! wait_for_idle; then
       (( _defer_count++ ))
       if (( _defer_count >= 6 )); then
-        echo "[clmux-bridge] error: idle timeout after ${_defer_count} retries, skipping message" >&2
-        [[ -n "$ts" ]] && mark_read "$ts"
-        _defer_count=0
-      else
-        echo "[clmux-bridge] warning: not idle, deferring send (${_defer_count}/6)" >&2
-        sleep 5
-        continue
+        # Per queue-lifecycle invariant: persistent unresponsiveness ends
+        # the agent session. Killing the pane triggers cleanup() which
+        # purges the inbox so messages don't linger as data loss.
+        echo "[clmux-bridge] error: idle timeout after ${_defer_count} retries, killing pane (queue will be purged)" >&2
+        tmux kill-pane -t "$PANE_ID" 2>/dev/null
+        exit 0
       fi
+      echo "[clmux-bridge] warning: not idle, deferring send (${_defer_count}/6)" >&2
+      sleep 5
+      continue
     fi
     _defer_count=0
 
@@ -176,18 +193,32 @@ except: print('')
         fi
       done
       if [[ "$_chunk_fail" == true ]]; then
+        (( _paste_fail_count++ ))
+        if (( _paste_fail_count >= 3 )); then
+          echo "[clmux-bridge] error: paste-buffer failed ${_paste_fail_count} times, killing pane (queue will be purged)" >&2
+          tmux kill-pane -t "$PANE_ID" 2>/dev/null
+          exit 0
+        fi
         sleep 2; continue
       fi
     else
       _buf="clmux-${$}-${RANDOM}"
+      _single_fail=false
       if ! printf '%s' "$text" | tmux load-buffer -b "$_buf" - 2>/dev/null; then
         echo "[clmux-bridge] error: load-buffer failed (pane:$PANE_ID)" >&2
-        sleep 2
-        continue
-      fi
-      if ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
+        _single_fail=true
+      elif ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
         echo "[clmux-bridge] error: paste-buffer failed (pane:$PANE_ID)" >&2
         tmux delete-buffer -b "$_buf" 2>/dev/null
+        _single_fail=true
+      fi
+      if [[ "$_single_fail" == true ]]; then
+        (( _paste_fail_count++ ))
+        if (( _paste_fail_count >= 3 )); then
+          echo "[clmux-bridge] error: paste-buffer failed ${_paste_fail_count} times, killing pane (queue will be purged)" >&2
+          tmux kill-pane -t "$PANE_ID" 2>/dev/null
+          exit 0
+        fi
         sleep 2
         continue
       fi
@@ -215,6 +246,7 @@ except: print('')
     [[ "$_enter_ok" == false ]] && echo "[clmux-bridge] error: Enter not accepted after 5 retries" >&2
 
     [[ -n "$ts" ]] && mark_read "$ts"
+    _paste_fail_count=0
   fi
 
   sleep 2

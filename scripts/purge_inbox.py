@@ -24,6 +24,11 @@ try:
             json.dump([], tf, indent=2)
             tmp_name = tf.name
         os.replace(tmp_name, path)
+except FileNotFoundError as e:
+    # Inbox dir is already gone — nothing to purge. Exit 0 because
+    # the invariant ("inbox empty after cleanup") holds vacuously.
+    print(f"purge_inbox: inbox dir gone, skipping: {e}", file=sys.stderr)
+    sys.exit(0)
 except Exception as e:
     print(f"purge_inbox: error: {e}", file=sys.stderr)
     sys.exit(1)

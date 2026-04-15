@@ -30,7 +30,13 @@ if not updated:
         "isActive": True
     })
 dir_ = os.path.dirname(os.path.abspath(cfg_path))
-with tempfile.NamedTemporaryFile(mode='w', dir=dir_, delete=False, suffix='.tmp') as tf:
-    json.dump(cfg, tf, indent=2)
-    tmp_name = tf.name
-os.replace(tmp_name, cfg_path)
+try:
+    with tempfile.NamedTemporaryFile(mode='w', dir=dir_, delete=False, suffix='.tmp') as tf:
+        json.dump(cfg, tf, indent=2)
+        tmp_name = tf.name
+    os.replace(tmp_name, cfg_path)
+except FileNotFoundError as e:
+    # Team dir disappeared (TeamDelete race, manual rm). Nothing to
+    # update. Spawner will see this as a non-fatal warning.
+    print(f"update_pane: team dir gone, skipping: {e}", file=sys.stderr)
+    sys.exit(0)

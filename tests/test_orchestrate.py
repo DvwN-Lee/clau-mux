@@ -278,3 +278,39 @@ class TestMasterLock:
         orch.claim_master("%105", label="a")
         with pytest.raises(orch.MasterLockError, match="not held by %999"):
             orch.release_master("%999")
+
+
+class TestMeetingLock:
+    def test_claim_meeting_when_none(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.claim_meeting("m-001", topic="test topic", started_by="%105",
+                            team_name="meeting-m-001")
+        info = orch.current_meeting()
+        assert info["meeting_id"] == "m-001"
+        assert info["topic"] == "test topic"
+        assert info["team_name"] == "meeting-m-001"
+
+    def test_claim_meeting_while_active_raises(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.claim_meeting("m-001", topic="a", started_by="%105", team_name="t1")
+        with pytest.raises(orch.MeetingLockError, match="in progress"):
+            orch.claim_meeting("m-002", topic="b", started_by="%105", team_name="t2")
+
+    def test_release_meeting_allows_next(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.claim_meeting("m-001", topic="a", started_by="%105", team_name="t1")
+        orch.release_meeting("m-001")
+        assert orch.current_meeting() is None
+        # Next claim OK
+        orch.claim_meeting("m-002", topic="b", started_by="%105", team_name="t2")
+        assert orch.current_meeting()["meeting_id"] == "m-002"
+
+    def test_release_meeting_mismatch_is_noop(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        orch.claim_meeting("m-001", topic="a", started_by="%105", team_name="t1")
+        orch.release_meeting("m-999")  # wrong id — should be silent no-op
+        assert orch.current_meeting()["meeting_id"] == "m-001"

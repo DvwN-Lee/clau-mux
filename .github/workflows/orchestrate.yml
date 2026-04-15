@@ -35,6 +35,38 @@ jobs:
       - name: Integration test
         run: bash tests/test_orchestrate_integration.sh
         timeout-minutes: 2
-      - name: Pipeline tests
-        run: bash tests/test_clmux_pipeline.sh
+      - name: Pipeline tests (with failure diagnostic)
+        run: |
+          set -x
+          tmux -V
+          zsh --version
+          echo "--- HOME listing ---"
+          ls -la "$HOME"
+          echo "--- shell rc files ---"
+          for f in ~/.zshrc ~/.zshenv ~/.zprofile ~/.zlogin ~/.bashrc; do
+            if [[ -e "$f" ]]; then
+              echo "EXISTS: $f ($(wc -c <"$f") bytes)"
+            else
+              echo "MISSING: $f"
+            fi
+          done
+          set +x
+          export CLMUX_PIPELINE_TEST_DIAG=1
+          if bash tests/test_clmux_pipeline.sh; then
+            echo "pipeline tests OK"
+            exit 0
+          fi
+          ec=$?
+          echo "--- PIPELINE TEST FAILURE DIAGNOSTIC ---"
+          echo "exit code: $ec"
+          echo "--- tmux sessions ---"
+          tmux list-sessions 2>&1 || true
+          for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+            echo "=== session: $s ==="
+            tmux list-panes -t "$s" -F '#{pane_id} pid=#{pane_pid} cmd=#{pane_current_command} tty=#{pane_tty}' 2>&1 || true
+            echo "--- capture-pane (last 40 lines) ---"
+            tmux capture-pane -t "$s" -p -S -40 2>&1 || true
+            echo "--- /end $s ---"
+          done
+          exit "$ec"
         timeout-minutes: 3

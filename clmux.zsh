@@ -88,7 +88,7 @@ clmux() {
       _clmux_ensure_team "$_team_dir" "$_team"
       python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
         --outbox "$_team_dir/inboxes/team-lead.json" --agent codex-worker &>/dev/null
-      _clmux_spawn_agent "codex -a never" codex-worker "›" paste 1 colour36 0 -t "$_team"
+      _clmux_spawn_agent "codex -a never" codex-worker "^[[:space:]]*›" paste 1 colour36 0 -t "$_team"
     fi
     if [[ "$copilot_flag" -eq 1 ]] && _clmux_agent_enabled copilot; then
       local _cp_outbox="$_team_dir/inboxes/team-lead.json"
@@ -193,7 +193,7 @@ clmux() {
     [[ ! -f "$_st_inbox_dir/team-lead.json" ]]    && echo '[]' > "$_st_inbox_dir/team-lead.json"
     python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
       --outbox "$_st_inbox_dir/team-lead.json" --agent codex-worker &>/dev/null
-    _clmux_spawn_agent_in_session "$session_name" "codex -a never" codex-worker "›" paste 1 colour36 0 "$_st_team"
+    _clmux_spawn_agent_in_session "$session_name" "codex -a never" codex-worker "^[[:space:]]*›" paste 1 colour36 0 "$_st_team"
   fi
 
   if [[ "$copilot_flag" -eq 1 ]] && _clmux_agent_enabled copilot; then
@@ -517,7 +517,7 @@ if _clmux_agent_enabled codex; then
   clmux-codex() {
     # Spawns a Codex CLI tmux pane as a Claude Code teammate.
     # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
-    _clmux_spawn_agent "codex -a never" codex-worker "›" paste 1 colour36 0 "$@"
+    _clmux_spawn_agent "codex -a never" codex-worker "^[[:space:]]*›" paste 1 colour36 0 "$@"
   }
 
   clmux-codex-stop() {

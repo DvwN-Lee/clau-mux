@@ -43,13 +43,15 @@ AGENT_NAME=$(basename "$INBOX" .json)
 
 wait_for_idle() {
   local elapsed=0
-  # Match within the last 8 non-empty lines so that multi-line prompts
-  # (gemini's prompt sits 4-5 lines above the bottom because of its
-  # workspace/branch/model status footer) are still detected, while
-  # avoiding the previous full-scrollback scan that false-matched on
-  # stale history.
+  # Match the IDLE_PATTERN (extended regex) within the last 8 non-empty
+  # lines — the prompt area. gemini's prompt sits 4-5 lines above the
+  # bottom due to its workspace/branch/model footer, so we can't narrow
+  # below tail -8 safely. Using grep -qE (not -qF) lets each CLI wrapper
+  # anchor its pattern to reduce false positives from the CLI's own
+  # response text that happens to contain the pattern (e.g. a code
+  # example quoting the › prompt glyph).
   while (( elapsed < TIMEOUT )); do
-    tmux capture-pane -t "$PANE_ID" -p | grep -v '^\s*$' | tail -8 | grep -qF "$IDLE_PATTERN" && return 0
+    tmux capture-pane -t "$PANE_ID" -p | grep -v '^\s*$' | tail -8 | grep -qE "$IDLE_PATTERN" && return 0
     sleep 1
     (( elapsed++ ))
   done

@@ -9,6 +9,9 @@
 # Exit 1: at least one test failed
 set -euo pipefail
 
+# Ensure tmux server is running (CI images have no active server initially).
+tmux start-server 2>/dev/null || true
+
 CLMUX_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PIPELINE="bash $CLMUX_DIR/scripts/clmux_pipeline.sh"
 

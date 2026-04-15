@@ -70,6 +70,7 @@ Usage: clmux_pipeline.sh <subcommand> [options]
 Subcommands:
   create <name> [--headless] [--cwd <path>] [--tag <tag>]
   shutdown <name> [--timeout <sec>] [--force] [--dry-run]
+  shutdown-tagged <tag> [--timeout <sec>]
   kill <name>
 USAGE
     exit 1
@@ -254,6 +255,48 @@ cmd_shutdown() {
 }
 
 # ---------------------------------------------------------------------------
+# shutdown-tagged
+# ---------------------------------------------------------------------------
+
+cmd_shutdown_tagged() {
+    local target_tag=""
+    local pass_args=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --timeout) pass_args+=("--timeout" "$2"); shift 2 ;;
+            -*)        echo "ERROR: unknown option $1" >&2; exit 1 ;;
+            *)
+                if [[ -z "$target_tag" ]]; then
+                    target_tag="$1"; shift
+                else
+                    echo "ERROR: unexpected argument $1" >&2; exit 1
+                fi
+                ;;
+        esac
+    done
+
+    [[ -z "$target_tag" ]] && { echo "ERROR: tag required" >&2; exit 1; }
+
+    _require_tmux
+
+    local overall=0
+    local sess t ec
+    for sess in $(tmux list-sessions -F '#{session_name}' 2>/dev/null || true); do
+        t=$(tmux show-option -t "$sess" -v @pipeline_tag 2>/dev/null || true)
+        if [[ "$t" == "$target_tag" ]]; then
+            ec=0
+            cmd_shutdown "$sess" "${pass_args[@]}" || ec=$?
+            if [[ "$ec" -ne 0 ]]; then
+                overall="$ec"
+            fi
+        fi
+    done
+
+    return "$overall"
+}
+
+# ---------------------------------------------------------------------------
 # kill (legacy alias)
 # ---------------------------------------------------------------------------
 
@@ -275,10 +318,11 @@ subcmd="$1"
 shift
 
 case "$subcmd" in
-    create)    cmd_create "$@" ;;
-    shutdown)  cmd_shutdown "$@" ;;
-    kill)      cmd_kill "$@" ;;
-    --help|-h) _usage ;;
+    create)          cmd_create "$@" ;;
+    shutdown)        cmd_shutdown "$@" ;;
+    shutdown-tagged) cmd_shutdown_tagged "$@" ;;
+    kill)            cmd_kill "$@" ;;
+    --help|-h)       _usage ;;
     *)
         echo "ERROR: unknown subcommand '$subcmd'" >&2
         _usage

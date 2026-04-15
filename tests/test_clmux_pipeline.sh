@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/test_clmux_pipeline.sh  (commit 2: shutdown tests added)
+# tests/test_clmux_pipeline.sh  (commit 3: shutdown-tagged + safety regression)
 set -euo pipefail
 
 CLMUX_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -123,6 +123,44 @@ ec=0
 $PIPELINE shutdown "$nonexist" || ec=$?
 assert_eq "$ec" "0" "shutdown on missing session should be idempotent (exit 0)"
 pass "shutdown non-existent session exits 0 (idempotent)"
+
+# Test 9: shutdown-tagged kills only tagged sessions
+sess_a="${PFX}_9a"
+sess_b="${PFX}_9b"
+sess_c="${PFX}_9c"
+$PIPELINE create "$sess_a" --headless --tag "orch-test" >/dev/null
+$PIPELINE create "$sess_b" --headless --tag "orch-test" >/dev/null
+$PIPELINE create "$sess_c" --headless >/dev/null
+sleep 0.3
+ec=0
+$PIPELINE shutdown-tagged "orch-test" --timeout 8 || ec=$?
+[[ "$ec" -eq 0 ]] || { fail "shutdown-tagged exit code should be 0, got $ec"; }
+assert_session_gone "$sess_a"
+assert_session_gone "$sess_b"
+assert_session_exists "$sess_c"
+tmux kill-session -t "$sess_c" 2>/dev/null || true
+pass "shutdown-tagged kills only tagged sessions, leaves untagged intact"
+
+# Test 12 (safety regression — placed here for early guard)
+# Create 2 unrelated sessions with no pipeline tags; shut down a pipeline session;
+# assert unrelated sessions survived.
+unrelated_a="${PFX}_unrelated_a"
+unrelated_b="${PFX}_unrelated_b"
+pipeline_target="${PFX}_safety_target"
+
+tmux new-session -d -s "$unrelated_a" "exec zsh"
+tmux new-session -d -s "$unrelated_b" "exec zsh"
+$PIPELINE create "$pipeline_target" --headless --tag "safety-test" >/dev/null
+sleep 0.3
+$PIPELINE shutdown "$pipeline_target" --timeout 5 || true
+
+assert_session_exists "$unrelated_a"
+assert_session_exists "$unrelated_b"
+assert_session_gone "$pipeline_target"
+
+tmux kill-session -t "$unrelated_a" 2>/dev/null || true
+tmux kill-session -t "$unrelated_b" 2>/dev/null || true
+pass "SAFETY REGRESSION: unrelated sessions unaffected by targeted shutdown"
 
 if [[ "$fail_count" -gt 0 ]]; then
     echo "FAIL: $fail_count test(s) failed out of $test_count" >&2

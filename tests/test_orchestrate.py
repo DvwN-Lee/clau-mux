@@ -348,3 +348,146 @@ class TestPanes:
         orch = _import_orch(monkeypatch, tmp_path)
         orch.ensure_layout()
         assert orch.list_panes() == {}
+
+
+class TestThread:
+    def test_open_thread_writes_meta_and_index(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128",
+                                parent_thread_id=None, label="root-task")
+        assert tid.startswith("t-")
+        # thread_meta is first line
+        records = orch.read_thread(tid)
+        assert records[0]["kind"] == "thread_meta"
+        assert records[0]["body"]["delegator"] == "%105"
+        assert records[0]["body"]["parent_thread_id"] is None
+        assert records[0]["body"]["root"] is True
+        # index updated
+        idx = orch.read_thread_index()
+        assert idx[tid]["state"] == "CREATED"
+        assert idx[tid]["delegator"] == "%105"
+        assert idx[tid]["assignee"] == "%128"
+
+    def test_child_thread_records_parent(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        parent = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        child = orch.open_thread(delegator="%128", assignee="%200",
+                                  parent_thread_id=parent)
+        records = orch.read_thread(child)
+        assert records[0]["body"]["parent_thread_id"] == parent
+        assert records[0]["body"]["root"] is False
+
+    def test_transition_delegate_sets_in_progress_requires_ack(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        # delegate (content of task)
+        env = orch.make_envelope(
+            thread_id=tid, from_="%105", to="%128",
+            kind="delegate", body={"scope": "x", "success_criteria": "y"},
+        )
+        orch.post_envelope(env)
+        assert orch.read_thread_index()[tid]["state"] == "CREATED"
+        # ack transitions to IN_PROGRESS
+        ack = orch.make_envelope(
+            thread_id=tid, from_="%128", to="%105", kind="ack", body={},
+        )
+        orch.post_envelope(ack)
+        assert orch.read_thread_index()[tid]["state"] == "IN_PROGRESS"
+
+    def test_transition_report_then_accept(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        for env_kwargs in [
+            {"from_": "%105", "to": "%128", "kind": "delegate",
+             "body": {"scope": "x", "success_criteria": "y"}},
+            {"from_": "%128", "to": "%105", "kind": "ack", "body": {}},
+            {"from_": "%128", "to": "%105", "kind": "report",
+             "body": {"summary": "done", "evidence": ["ok"]}},
+        ]:
+            orch.post_envelope(orch.make_envelope(thread_id=tid, **env_kwargs))
+        assert orch.read_thread_index()[tid]["state"] == "REPORTED"
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%105", to="%128", kind="accept", body={},
+        ))
+        assert orch.read_thread_index()[tid]["state"] == "ACCEPTED"
+
+    def test_transition_reject_returns_to_in_progress(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        for env_kwargs in [
+            {"from_": "%105", "to": "%128", "kind": "delegate",
+             "body": {"scope": "x", "success_criteria": "y"}},
+            {"from_": "%128", "to": "%105", "kind": "ack", "body": {}},
+            {"from_": "%128", "to": "%105", "kind": "report",
+             "body": {"summary": "done", "evidence": ["ok"]}},
+            {"from_": "%105", "to": "%128", "kind": "reject",
+             "body": {"feedback": "not enough tests"}},
+        ]:
+            orch.post_envelope(orch.make_envelope(thread_id=tid, **env_kwargs))
+        assert orch.read_thread_index()[tid]["state"] == "IN_PROGRESS"
+
+    def test_illegal_transition_accept_before_report_raises(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%105", to="%128", kind="delegate",
+            body={"scope": "x", "success_criteria": "y"},
+        ))
+        orch.post_envelope(orch.make_envelope(
+            thread_id=tid, from_="%128", to="%105", kind="ack", body={},
+        ))
+        # accept without report should fail
+        with pytest.raises(orch.TransitionError, match="IN_PROGRESS"):
+            orch.post_envelope(orch.make_envelope(
+                thread_id=tid, from_="%105", to="%128", kind="accept", body={},
+            ))
+
+    def test_close_thread_sets_closed(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        for env_kwargs in [
+            {"from_": "%105", "to": "%128", "kind": "delegate",
+             "body": {"scope": "x", "success_criteria": "y"}},
+            {"from_": "%128", "to": "%105", "kind": "ack", "body": {}},
+            {"from_": "%128", "to": "%105", "kind": "report",
+             "body": {"summary": "done", "evidence": ["ok"]}},
+            {"from_": "%105", "to": "%128", "kind": "accept", "body": {}},
+        ]:
+            orch.post_envelope(orch.make_envelope(thread_id=tid, **env_kwargs))
+        orch.close_thread(tid, note="user approved")
+        assert orch.read_thread_index()[tid]["state"] == "CLOSED"
+
+    def test_close_thread_requires_accepted_state(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        with pytest.raises(orch.TransitionError, match="ACCEPTED"):
+            orch.close_thread(tid, note="premature")
+
+    def test_h1_envelope_logged_even_when_transition_fails(self, tmp_path, monkeypatch):
+        """[H1] Envelope is appended to JSONL BEFORE transition.
+        An illegal transition raises but the envelope stays in the audit
+        log — enabling forensics on rejected attempts.
+        """
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        tid = orch.open_thread(delegator="%105", assignee="%128", parent_thread_id=None)
+        # Attempt illegal transition: accept in CREATED state
+        with pytest.raises(orch.TransitionError):
+            orch.post_envelope(orch.make_envelope(
+                thread_id=tid, from_="%105", to="%128", kind="accept", body={},
+            ))
+        # Envelope is still in the audit log
+        records = orch.read_thread(tid)
+        kinds = [r["kind"] for r in records]
+        assert kinds.count("accept") == 1, \
+            "H1: illegal envelope must still be logged for audit"
+        # Index state unchanged (still CREATED)
+        assert orch.read_thread_index()[tid]["state"] == "CREATED"

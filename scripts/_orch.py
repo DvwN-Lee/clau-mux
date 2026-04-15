@@ -434,3 +434,141 @@ def unregister_pane(pane_id: str) -> None:
         if pane_id in current:
             del current[pane_id]
             atomic_json_write(path, current)
+
+
+# ─── thread (state machine) ─────────────────────────────────────────────────
+
+class TransitionError(RuntimeError):
+    """Raised on illegal state transition."""
+
+
+_ALLOWED_TRANSITIONS = {
+    "CREATED":     {"ack": "IN_PROGRESS"},
+    "IN_PROGRESS": {"progress": "IN_PROGRESS", "report": "REPORTED"},
+    "REPORTED":    {"accept": "ACCEPTED", "reject": "IN_PROGRESS"},
+    "ACCEPTED":    {},   # closed via explicit close_thread()
+    "CLOSED":      {},
+}
+
+
+def _thread_index_path() -> Path:
+    return root() / "threads" / "index.json"
+
+
+def read_thread_index() -> dict:
+    path = _thread_index_path()
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _write_thread_index(idx: dict) -> None:
+    atomic_json_write(_thread_index_path(), idx)
+
+
+def open_thread(delegator: str, assignee: str,
+                parent_thread_id: str | None, label: str = "") -> str:
+    """Create a new thread, write thread_meta, initialize index entry.
+    Returns the new thread_id.
+    """
+    ensure_layout()
+    tid = _rand_id("t")
+    meta_env = make_envelope(
+        thread_id=tid, from_=delegator, to=assignee,
+        kind="thread_meta",
+        body={
+            "parent_thread_id": parent_thread_id,
+            "delegator": delegator,
+            "root": parent_thread_id is None,
+            "label": label,
+        },
+    )
+    validate_envelope(meta_env)
+    append_thread(tid, meta_env)
+    # Update index
+    with file_lock(str(_thread_index_path())):
+        idx = read_thread_index()
+        idx[tid] = {
+            "state": "CREATED",
+            "delegator": delegator,
+            "assignee": assignee,
+            "parent_thread_id": parent_thread_id,
+            "created_at": meta_env["ts"],
+            "updated_at": meta_env["ts"],
+        }
+        _write_thread_index(idx)
+    return tid
+
+
+def _apply_transition(tid: str, kind: str) -> None:
+    """Advance thread state per _ALLOWED_TRANSITIONS. Raise if illegal."""
+    with file_lock(str(_thread_index_path())):
+        idx = read_thread_index()
+        if tid not in idx:
+            raise TransitionError(f"unknown thread: {tid}")
+        current = idx[tid]["state"]
+        allowed = _ALLOWED_TRANSITIONS.get(current, {})
+        if kind not in allowed:
+            raise TransitionError(
+                f"cannot apply {kind} in state {current} (thread {tid})"
+            )
+        idx[tid]["state"] = allowed[kind]
+        idx[tid]["updated_at"] = _now_ts()
+        _write_thread_index(idx)
+
+
+def post_envelope(env: dict) -> None:
+    """Validate, append, and (if state-changing) advance thread state.
+
+    [H1 amendment per 2026-04-15 cross-review] Ordering:
+      1. validate
+      2. append_thread   <- JSONL is source of truth (audit log)
+      3. _apply_transition  <- index.json is a derived summary
+
+    Rationale: if the process crashes between the two writes, a
+    JSONL-first order leaves the log with a record that HAS NO
+    corresponding index transition (rather than an index transition
+    with NO audit record). On recovery, an operator can inspect the
+    JSONL audit log directly and reason about the correct index state.
+
+    [v3 per codex-reviewer] The phrase "index.json can be replayed to
+    reconstruct" was softened in this docstring because Phase 1 does
+    NOT ship an automated `rebuild_thread_index()` function. Recovery
+    is manual or via retry of the next valid transition. A programmatic
+    rebuild/repair path is queued in Phase 2 Roadmap (#5).
+
+    read_thread() already skips corrupt/partial JSONL lines, so a
+    half-written append is bounded damage.
+    """
+    validate_envelope(env)
+    tid = env["thread_id"]
+    kind = env["kind"]
+    # State-changing kinds (not thread_meta, which is initial marker)
+    state_changing = {"ack", "progress", "report", "accept", "reject"}
+    # 1) Append to audit log FIRST so the envelope is durable.
+    append_thread(tid, env)
+    # 2) THEN advance state. If this raises (illegal transition),
+    #    the envelope is still logged -- caller sees TransitionError,
+    #    index remains at previous state. Caller MAY choose to log
+    #    the illegal attempt as an audit event separately.
+    if kind in state_changing:
+        _apply_transition(tid, kind)
+
+
+def close_thread(tid: str, note: str = "") -> None:
+    """Transition ACCEPTED -> CLOSED after external user approval."""
+    with file_lock(str(_thread_index_path())):
+        idx = read_thread_index()
+        if tid not in idx:
+            raise TransitionError(f"unknown thread: {tid}")
+        if idx[tid]["state"] != "ACCEPTED":
+            raise TransitionError(
+                f"can only close ACCEPTED threads (current: {idx[tid]['state']})"
+            )
+        idx[tid]["state"] = "CLOSED"
+        idx[tid]["updated_at"] = _now_ts()
+        idx[tid]["close_note"] = note
+        _write_thread_index(idx)

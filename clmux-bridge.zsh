@@ -74,6 +74,9 @@ cleanup() {
   rm -f "$TEAM_DIR/.${AGENT_NAME}-bridge.pid"
   rm -f "$TEAM_DIR/.${AGENT_NAME}-pane"
   python3 "$CLMUX_DIR/scripts/deactivate_pane.py" "$TEAM_DIR" "$AGENT_NAME" 2>/dev/null
+  # Invariant: queue lifecycle = agent session lifecycle. On any exit,
+  # discard remaining messages so the next spawn starts from a clean queue.
+  python3 "$CLMUX_DIR/scripts/purge_inbox.py" "$INBOX" 2>/dev/null
   echo "[clmux-bridge] shutting down"
 }
 trap 'cleanup; exit 0' INT TERM EXIT

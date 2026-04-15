@@ -64,18 +64,22 @@ mark_read() {
 
 echo "[clmux-bridge] started — pane:$PANE_ID  agent:$AGENT_NAME  idle:\"$IDLE_PATTERN\""
 
-wait_for_idle || { echo "[clmux-bridge] error: CLI not ready (pattern: $IDLE_PATTERN)" >&2; exit 1; }
-echo "[clmux-bridge] ready — polling inbox every 2s (Ctrl+C to stop)"
-
+# Trap MUST be set before wait_for_idle: an early `exit 1` from a failed
+# initial idle-wait would otherwise skip cleanup and leave config.json with
+# isActive:true (Ghost Agent) and orphan marker files.
 TEAM_DIR=$(dirname "$(dirname "$INBOX")")
 
 cleanup() {
   rm -f "$TEAM_DIR/.bridge-${AGENT_NAME}.env"
   rm -f "$TEAM_DIR/.${AGENT_NAME}-bridge.pid"
   rm -f "$TEAM_DIR/.${AGENT_NAME}-pane"
+  python3 "$CLMUX_DIR/scripts/deactivate_pane.py" "$TEAM_DIR" "$AGENT_NAME" 2>/dev/null
   echo "[clmux-bridge] shutting down"
 }
 trap 'cleanup; exit 0' INT TERM EXIT
+
+wait_for_idle || { echo "[clmux-bridge] error: CLI not ready (pattern: $IDLE_PATTERN)" >&2; exit 1; }
+echo "[clmux-bridge] ready — polling inbox every 2s (Ctrl+C to stop)"
 
 _defer_count=0
 while true; do
@@ -129,8 +133,7 @@ except: print('')
       [[ -n "$ts" ]] && mark_read "$ts"
       tmux kill-pane -t "$PANE_ID" 2>/dev/null
       python3 "$CLMUX_DIR/scripts/notify_shutdown.py" "$INBOX" "$AGENT_NAME" "$request_id" 2>/dev/null
-      python3 "$CLMUX_DIR/scripts/deactivate_pane.py" "$TEAM_DIR" "$AGENT_NAME" 2>/dev/null
-      exit 0
+      exit 0   # cleanup trap calls deactivate_pane.py
     fi
 
     if ! wait_for_idle; then

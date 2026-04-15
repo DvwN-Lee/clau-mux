@@ -88,8 +88,7 @@ clmux-pipeline kill <name>
    `tmux kill-session` and exits with code 2.
 6. If an iTerm window was stored, closes it via `id of window`.
 
-`--force` skips steps 1-4 and goes directly to `tmux kill-session` (exit code 0
-for the kill itself, but the session was not graceful).
+`--force` skips steps 1-4 and goes directly to `tmux kill-session`. Exit code is 0.
 
 `--dry-run` prints what would happen without making any changes. Example output:
 

@@ -251,7 +251,11 @@ cmd_shutdown() {
                 tmux send-keys -t "$pane_id" "/exit" Enter 2>/dev/null || true
                 ;;
             zsh|bash|fish|sh)
-                tmux send-keys -t "$pane_id" "exit" Enter 2>/dev/null || true
+                # C-d (EOF) instead of "exit" Enter:
+                # - Delivered at pty level, bypasses ZLE/readline readiness race
+                # - Deterministic on Ubuntu zsh 5.8 + tmux 3.2a (CI)
+                # - Same semantic on macOS zsh 5.9
+                tmux send-keys -t "$pane_id" C-d 2>/dev/null || true
                 ;;
             *)
                 tmux send-keys -t "$pane_id" C-d 2>/dev/null || true

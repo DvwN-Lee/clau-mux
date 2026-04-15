@@ -315,7 +315,9 @@ cmd_shutdown_tagged() {
 
     local overall=0
     local sess t ec
-    for sess in $(tmux list-sessions -F '#{session_name}' 2>/dev/null || true); do
+    # Use while-read-line to tolerate whitespace in session names
+    while IFS= read -r sess; do
+        [[ -z "$sess" ]] && continue
         t=$(tmux show-option -t "$sess" -v @pipeline_tag 2>/dev/null || true)
         if [[ "$t" == "$target_tag" ]]; then
             ec=0
@@ -324,7 +326,7 @@ cmd_shutdown_tagged() {
                 overall="$ec"
             fi
         fi
-    done
+    done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
 
     return "$overall"
 }
@@ -352,7 +354,9 @@ cmd_list() {
     printf "%-16s %-8s %-12s %-14s %s\n" "NAME" "PANE" "WINDOW_ID" "TAG" "UPTIME"
 
     local sess
-    for sess in $(tmux list-sessions -F '#{session_name}' 2>/dev/null || true); do
+    # Use while-read-line to tolerate whitespace in session names
+    while IFS= read -r sess; do
+        [[ -z "$sess" ]] && continue
         local wid tag created_at uptime pane_id
         wid=$(tmux show-option -t "$sess" -v @iterm_window_id 2>/dev/null || true)
         tag=$(tmux show-option -t "$sess" -v @pipeline_tag 2>/dev/null || true)
@@ -376,7 +380,7 @@ cmd_list() {
             "${wid:--}" \
             "${tag:--}" \
             "$uptime"
-    done
+    done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
 }
 
 # ---------------------------------------------------------------------------

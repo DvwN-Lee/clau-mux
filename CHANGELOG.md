@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.3.4 — 2026-04-16
+
+### Fixed
+- **Issue #24: native Agent-tool subagent shutdown leaves `isActive=true`
+  stale.** Bridge teammates self-clean via `clmux-bridge.zsh`'s
+  `trap cleanup INT TERM EXIT`, but Agent-tool subagents (agentType
+  `general-purpose`) have no wrapper process, so config.json drifts whenever
+  a subagent's pane/process dies (shutdown_request, turn end, OS kill). New
+  reconciliation path closes the gap uniformly for all agentTypes: any member
+  with `isActive=true` and a `tmuxPaneId` that is no longer in
+  `tmux list-panes -a` is flipped to `isActive=false`.
+- **Issue #3: copilot-worker `isActive=false` regression guard.** No
+  copilot-specific branch in `update_pane.py` — regression test locks in that
+  copilot-worker is treated identically to gemini/codex on both fresh spawn
+  and respawn after shutdown.
+
+### Added
+- `scripts/reconcile_active.py` — standalone CLI that reconciles a single
+  team's config.json against tmux pane liveness. Locks the config via the
+  same mkdir mutex used by `update_pane.py` / `deactivate_pane.py` so a race
+  with a concurrent spawn can't clobber either write.
+- `hooks/reconcile-active.py` — `SessionStart` hook wrapper that scopes
+  reconciliation to teams with `leadSessionId == session_id` (avoids touching
+  other sessions' teams in a multi-session environment).
+- `scripts/setup.sh` installs the new hook alongside `guard-task-bridge.py`
+  and prints the `SessionStart` registration snippet.
+
+### Tests
+- `tests/test_cleanup_hooks.py` — 10 tests: reconcile flips dead-pane
+  isActive to false (bridge + general-purpose), preserves live-pane true,
+  skips empty `tmuxPaneId`, is idempotent, degrades safely on missing
+  config; hook scopes by `leadSessionId`; update_pane.py copilot regression
+  (new and respawn). 88 pytest + 13 pipeline shell tests total.
+
 ## 1.3.3 — 2026-04-15
 
 ### CI

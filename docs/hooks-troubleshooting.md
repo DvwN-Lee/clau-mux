@@ -225,40 +225,99 @@ reason 메시지 형식은 hook 작성 시점에 컨벤션으로 못박았어야
 
 ---
 
-## 5. `copilot-worker` spawn 성공 후 `isActive=false` 잔류 (미해결)
+## 5. `copilot-worker` spawn 성공 후 `isActive=false` 잔류 ([#3](https://github.com/DvwN-Lee/clau-mux/issues/3), v1.3.3 regression guard)
+
+### 증상 (원 리포트)
+
+clmux bridge spawn 절차로 copilot bridge를 띄웠을 때 `~/.claude/teams/<team>/config.json`의 copilot-worker 항목이 `isActive: false` 로 잔류.
+
+### 재조사 (v1.3.3)
+
+`scripts/update_pane.py` 코드 재검토 결과 copilot 전용 분기는 존재하지 않음 — gemini/codex/copilot 모두 동일 경로로 `isActive=True` 기록. 원 리포트의 "추정 원인"(paste-mode 초기화 경로에서 누락)은 실제 코드와 불일치.
+
+재현 불가로 마무리하되, 향후 회귀를 차단하기 위해 `tests/test_cleanup_hooks.py::TestUpdatePaneCopilotRegression`에 아래 두 케이스를 고정:
+
+- `copilot-worker` 신규 spawn → `members[].isActive == True`
+- `copilot-worker` 재spawn (기존 `isActive=False` 항목 존재) → `isActive` 가 다시 `True` 로 flip, `tmuxPaneId` 갱신
+
+재발생 시 회귀 테스트가 먼저 실패하므로 원인 특정이 쉬움. 임시 대응: §6의 `reconcile-active` 가 pane 생존을 주기적으로 확인하므로 spawn 시점 누락이 있더라도 다음 SessionStart 때 정합화됨 (단, 원인은 별도 수정 필요).
+
+---
+
+## 6. Agent-tool subagent 종료 후 `isActive=true` 잔류 ([#24](https://github.com/DvwN-Lee/clau-mux/issues/24), v1.3.3 fixed)
 
 ### 증상
 
-clmux bridge spawn 절차로 copilot bridge를 띄우면 tmux pane은 정상 생성되고 paste-mode 진입까지 확인되지만, `~/.claude/teams/<team>/config.json`의 멤버 항목이 `isActive: false` 상태로 남음.
+`Agent` tool 로 spawn 한 general-purpose subagent (e.g., plan-reviewer, orch-plan-reviewer) 에 `SendMessage({"type":"shutdown_request"})` 승인 → OS 프로세스는 종료되지만 `~/.claude/teams/<team>/config.json` 의 해당 멤버 `isActive: true` 가 영원히 남음.
+
+실제 증거 (v1.3.2 당시 `clau-mux-final-verify` 팀):
+
+```json
+{ "name": "plan-reviewer",      "agentType": "general-purpose", "tmuxPaneId": "%125", "isActive": true }
+{ "name": "orch-plan-reviewer", "agentType": "general-purpose", "tmuxPaneId": "%130", "isActive": true }
+```
+
+같은 팀의 bridge 멤버 (gemini-worker, codex-worker, copilot-worker) 는 동일 종료 시퀀스에서 `isActive: false` 로 정상 정리됨.
+
+### 원인
+
+Bridge teammate 는 `clmux-bridge.zsh` 라는 래퍼 프로세스가 pane 을 폴링하며 실행되고, `trap cleanup INT TERM EXIT` 로 **어떤 종료 경로에서든** `scripts/deactivate_pane.py` 를 호출해 `isActive=false` 로 전환한다.
+
+반면 Agent-tool subagent (agentType `general-purpose`) 는 해당 래퍼가 없다. Claude Code 내부가 subagent 라이프사이클을 관리하지만 `config.json.members[].isActive` 는 clau-mux 의 필드이므로 자동 갱신되지 않는다. 결과적으로 모든 native subagent 는 **종료 경로 자체가 없음**.
+
+### 해결
+
+`scripts/reconcile_active.py` 를 추가하고 `SessionStart` hook 으로 연결.
+
+동작:
+
+1. `team_dir/config.json` 읽기
+2. `tmux list-panes -a -F '#{pane_id}'` 로 live pane 집합 수집
+3. 각 member 에 대해:
+   - `isActive == true` AND `tmuxPaneId` 비어있지 않음 AND `tmuxPaneId` ∉ live panes → `isActive=false` 로 flip
+4. 변경사항이 있으면 atomic replace (mkdir mutex 로 `update_pane.py` 와 동시 write 방지)
+
+Hook (`hooks/reconcile-active.py`) 는 payload 의 `session_id` 와 일치하는 `leadSessionId` 의 팀만 대상으로 하여 멀티세션 환경에서 타 세션 팀에 간섭하지 않는다.
+
+### 등록
 
 ```json
 {
-  "name": "copilot-worker",
-  "agentType": "bridge",
-  "isActive": false,   // ← spawn 성공했음에도 false
-  ...
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python3 ~/.claude/hooks/reconcile-active.py",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
 }
 ```
 
-### 영향
+`scripts/setup.sh` 가 자동 복사 + 등록 snippet 을 안내한다.
 
-- Lead가 SendMessage 라우팅 시 멤버를 active로 인식하지 못해 outbox 전달 실패할 수 있음
-- `guard-team-shutdown.py`가 "이미 inactive" 판단으로 정상 shutdown_request도 deny
-- `guard-task-bridge.py`는 영향 없음 (agentType만 검사)
+### 검증
 
-### 진단
+```
+# 수동 재현
+jq '.members[] | select(.name=="plan-reviewer") | {isActive, tmuxPaneId}' \
+  ~/.claude/teams/<team>/config.json
+# → {"isActive": true, "tmuxPaneId": "%125"} 이지만 tmux list-panes 에 %125 없음
 
-- gemini-worker, codex-worker는 동일 절차에서 `isActive: true`로 정상 등록됨
-- copilot-worker만 spawn 후 isActive 갱신 누락
-- pane 자체는 정상 동작 (paste-mode 진입, 수동 입력 가능)
+python3 ~/clau-mux/scripts/reconcile_active.py ~/.claude/teams/<team>
+# → "reconcile_active: flipped 1 stale isActive=true → false in ..."
 
-### 추정 원인
+jq '.members[] | select(.name=="plan-reviewer") | .isActive' \
+  ~/.claude/teams/<team>/config.json
+# → false ✅
+```
 
-`scripts/update_pane.py`의 copilot 전용 paste-mode 초기화 경로에서 isActive 갱신 호출이 빠진 것으로 의심됨. gemini/codex 경로와 분기된 코드 경로가 별도 isActive write를 수행하지 않을 가능성.
+### 한계
 
-### 현재 상태
-
-미해결 — [#3](https://github.com/DvwN-Lee/clau-mux/issues/3)에서 트래킹. 임시 우회는 config.json 직접 수정(`isActive: true`).
+pane ID 만 기준으로 하므로, pane 은 살아있지만 내부 subagent 프로세스가 죽은 희귀 케이스는 감지하지 못한다. 실무상 CLAUDE_CODE_SPAWN_BACKEND=tmux 환경에서는 pane 과 프로세스가 1:1 로 묶여 같이 죽으므로 현재까지 문제가 된 적은 없다.
 
 ---
 

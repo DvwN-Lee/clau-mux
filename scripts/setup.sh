@@ -209,7 +209,7 @@ HOOKS_SRC="$CLMUX_DIR/hooks"
 HOOKS_DST="$HOME/.claude/hooks"
 
 if [[ -d "$HOOKS_SRC" ]]; then
-  read -r -p "Install clau-mux hooks to ~/.claude/hooks/ (guard-task-bridge)? [Y/n] " hooks_answer
+  read -r -p "Install clau-mux hooks to ~/.claude/hooks/ (guard-task-bridge, reconcile-active)? [Y/n] " hooks_answer
   hooks_answer="${hooks_answer:-Y}"
   if [[ "$hooks_answer" =~ ^[Yy]$ ]]; then
     mkdir -p "$HOOKS_DST"
@@ -221,6 +221,9 @@ if [[ -d "$HOOKS_SRC" ]]; then
     echo "[NOTE] Register in ~/.claude/settings.json under PreToolUse:"
     echo '       {"matcher": "TaskCreate|TaskUpdate", "hooks": [{"type": "command",'
     echo '        "command": "python3 ~/.claude/hooks/guard-task-bridge.py", "timeout": 5}]}'
+    echo "[NOTE] Also register under SessionStart to auto-reconcile stale isActive:"
+    echo '       {"hooks": [{"type": "command",'
+    echo '        "command": "python3 ~/.claude/hooks/reconcile-active.py", "timeout": 5}]}'
   else
     echo "[SKIP] Hooks install skipped"
   fi

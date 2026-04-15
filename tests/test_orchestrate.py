@@ -201,6 +201,50 @@ class TestEnvelope:
         with pytest.raises(orch.EnvelopeError, match="required_changes.*must be list"):
             orch.validate_envelope(env)
 
+    def test_validate_blocked_requires_question(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        env = orch.make_envelope(
+            thread_id="t-100", from_="%128", to="%105",
+            kind="blocked", body={},  # missing question
+        )
+        with pytest.raises(orch.EnvelopeError, match="question"):
+            orch.validate_envelope(env)
+
+    def test_validate_blocked_happy_path(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        env = orch.make_envelope(
+            thread_id="t-101", from_="%128", to="%105",
+            kind="blocked", body={"question": "PostgreSQL or MySQL?"},
+        )
+        orch.validate_envelope(env)  # no exception
+
+    def test_validate_blocked_options_must_be_list(self, tmp_path, monkeypatch):
+        """options[] must be a list, not a string."""
+        orch = _import_orch(monkeypatch, tmp_path)
+        env = orch.make_envelope(
+            thread_id="t-102", from_="%128", to="%105",
+            kind="blocked", body={"question": "x?", "options": "not a list"},
+        )
+        with pytest.raises(orch.EnvelopeError, match="options.*must be list"):
+            orch.validate_envelope(env)
+
+    def test_validate_reply_requires_answer(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        env = orch.make_envelope(
+            thread_id="t-103", from_="%105", to="%128",
+            kind="reply", body={},  # missing answer
+        )
+        with pytest.raises(orch.EnvelopeError, match="answer"):
+            orch.validate_envelope(env)
+
+    def test_validate_reply_happy_path(self, tmp_path, monkeypatch):
+        orch = _import_orch(monkeypatch, tmp_path)
+        env = orch.make_envelope(
+            thread_id="t-104", from_="%105", to="%128",
+            kind="reply", body={"answer": "PostgreSQL"},
+        )
+        orch.validate_envelope(env)  # no exception
+
 
 class TestMasterLock:
     def test_claim_master_when_none(self, tmp_path, monkeypatch):

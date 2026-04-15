@@ -145,6 +145,8 @@ _KIND_REQUIRED = {
     "report":      ["summary", "evidence"],
     "accept":      [],
     "reject":      ["feedback"],
+    "blocked":     ["question"],
+    "reply":       ["answer"],
 }
 
 # Body fields that MUST be a list (enforced by validator). Docs promise
@@ -156,6 +158,7 @@ _LIST_FIELDS = {
                "consultations"],
     "reject": ["required_changes"],
     "delegate": ["resources", "consultations"],
+    "blocked": ["options"],
 }
 
 

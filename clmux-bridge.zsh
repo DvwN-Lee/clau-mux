@@ -192,7 +192,7 @@ except: print('')
           echo "[clmux-bridge] error: chunk load-buffer failed (pane:$PANE_ID)" >&2
           _chunk_fail=true; break
         fi
-        if ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
+        if ! tmux paste-buffer -d -p -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
           echo "[clmux-bridge] error: chunk paste-buffer failed (pane:$PANE_ID)" >&2
           tmux delete-buffer -b "$_buf" 2>/dev/null
           _chunk_fail=true; break
@@ -221,7 +221,7 @@ except: print('')
       if ! printf '%s' "$text" | tmux load-buffer -b "$_buf" - 2>/dev/null; then
         echo "[clmux-bridge] error: load-buffer failed (pane:$PANE_ID)" >&2
         _single_fail=true
-      elif ! tmux paste-buffer -d -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
+      elif ! tmux paste-buffer -d -p -b "$_buf" -t "$PANE_ID" 2>/dev/null; then
         echo "[clmux-bridge] error: paste-buffer failed (pane:$PANE_ID)" >&2
         tmux delete-buffer -b "$_buf" 2>/dev/null
         _single_fail=true

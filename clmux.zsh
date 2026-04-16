@@ -332,18 +332,32 @@ _clmux_spawn_agent() {
   [[ -z "$TMUX" ]] && { echo "error: _clmux_spawn_agent must be run inside a tmux session" >&2; return 1; }
   command -v "${cli_cmd%% *}" &>/dev/null || { echo "error: ${cli_cmd%% *} CLI not found in PATH" >&2; return 1; }
 
-  local team_name="" agent_name="$default_agent_name" timeout=30
+  local team_name="" agent_name="$default_agent_name" timeout=30 model=""
   local OPTIND=1
-  while getopts "t:n:x:" opt; do
+  while getopts "t:n:x:m:" opt; do
     case $opt in
       t) team_name="$OPTARG" ;;
       n) agent_name="$OPTARG" ;;
       x) timeout="$OPTARG" ;;
-      *) echo "Usage: _clmux_spawn_agent ... -t <team_name> [-n <name>] [-x <timeout>]" >&2; return 1 ;;
+      m) model="$OPTARG" ;;
+      *) echo "Usage: _clmux_spawn_agent ... -t <team_name> [-n <name>] [-x <timeout>] [-m <model>]" >&2; return 1 ;;
     esac
   done
 
   [[ -z "$team_name" ]] && { echo "error: -t <team_name> required" >&2; return 1; }
+
+  # Inject --model after the CLI binary name if -m was supplied.
+  # All three bridge CLIs (codex, gemini, copilot 0.0.365) expose
+  # --model <val>; syntax is consistent across them. Earlier wrappers
+  # only supported model via the CLI's own config file, which is
+  # inconvenient for per-team overrides. This injection lets callers
+  # pin a model per spawn without touching global config.
+  if [[ -n "$model" ]]; then
+    local cli_bin="${cli_cmd%% *}"
+    local cli_rest=""
+    [[ "$cli_bin" != "$cli_cmd" ]] && cli_rest="${cli_cmd#* }"
+    cli_cmd="$cli_bin --model $model${cli_rest:+ $cli_rest}"
+  fi
 
   local team_dir="$HOME/.claude/teams/$team_name"
   [[ ! -d "$team_dir" ]] && { echo "error: team '$team_name' not found at $team_dir" >&2; return 1; }
@@ -516,7 +530,7 @@ _clmux_agent_enabled() {
 if _clmux_agent_enabled gemini; then
   clmux-gemini() {
     # Spawns a Gemini CLI tmux pane as a Claude Code teammate.
-    # Usage: clmux-gemini -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
+    # Usage: clmux-gemini -t <team_name> [-n <agent_name>] [-x <timeout_sec>] [-m <model>]
     _clmux_spawn_agent gemini gemini-worker "Type your message" paste 0 colour33 1 "$@"
   }
 
@@ -530,7 +544,7 @@ fi
 if _clmux_agent_enabled codex; then
   clmux-codex() {
     # Spawns a Codex CLI tmux pane as a Claude Code teammate.
-    # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
+    # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-x <timeout_sec>] [-m <model>]
     _clmux_spawn_agent "codex -a never" codex-worker "^[[:space:]]*›" paste 1 colour36 0 "$@"
   }
 
@@ -544,7 +558,7 @@ fi
 if _clmux_agent_enabled copilot; then
   clmux-copilot() {
     # Spawns a Copilot CLI tmux pane as a Claude Code teammate.
-    # Usage: clmux-copilot -t <team_name> [-n <agent_name>] [-x <timeout_sec>]
+    # Usage: clmux-copilot -t <team_name> [-n <agent_name>] [-x <timeout_sec>] [-m <model>]
     #
     # Copilot CLI only supports HTTP/SSE MCP servers (requires url field).
     # We start bridge-mcp-server.js in HTTP mode on a free port, write the URL

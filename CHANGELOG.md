@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.3.6 — 2026-04-16
+
+### Fixed
+- **SendMessage drop defence (Issue #25, Fix 6.1 + 6.2).** After session resume,
+  `teamContext.teamName` may not be restored in Claude Code's bundled JS, causing
+  SendMessage to silently write to `~/.claude/teams/default/inboxes/` where no
+  teammate reads it. Two new hooks provide defence-in-depth until the upstream fix:
+  - `hooks/guard-sendmessage.py` — **PreToolUse** guard that denies SendMessage
+    when the target name is not found in any active team's members (fail-loud).
+    Broadcast (`to="*"`) and non-team sessions are always allowed.
+  - `hooks/rescue-default-inbox.py` — **Stop** hook that moves misdelivered
+    messages from `teams/default/inboxes/` to the correct active team's inbox at
+    every turn end. Handles merge when the target inbox already has files.
+
+### Tests
+- `tests/test_sendmessage_hooks.py` — 9 tests: guard blocks unknown target,
+  allows known member (by name and agentId), allows broadcast, fails-open
+  with no teams; rescue moves messages, noop when empty, merges with existing,
+  noop when no active team. 119 pytest total.
+
 ## 1.3.5 — 2026-04-16
 
 ### Fixed

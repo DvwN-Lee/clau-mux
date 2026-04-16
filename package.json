@@ -1,6 +1,6 @@
 {
   "name": "clau-mux-bridge",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "description": "MCP stdio server for clau-mux: bridges Gemini/Codex CLI to Claude Code teammate protocol",
   "bin": {
     "clau-mux-bridge": "./bridge-mcp-server.js"

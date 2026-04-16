@@ -1,5 +1,17 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/guard-sendmessage.py",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "TeamCreate|TeamDelete|Agent|SendMessage|TaskCreate",
@@ -7,6 +19,17 @@
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/emit_tool_event.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/rescue-default-inbox.py",
             "timeout": 5
           }
         ]

@@ -648,13 +648,21 @@ If `settings.json` does not exist at repo root, create it with exactly this cont
   "hooks": {
     "PostToolUse": [
       {
-        "matchers": ["TeamCreate", "TeamDelete", "Agent", "SendMessage", "TaskCreate"],
-        "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/emit_tool_event.py"
+        "matcher": "TeamCreate|TeamDelete|Agent|SendMessage|TaskCreate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/emit_tool_event.py",
+            "timeout": 5
+          }
+        ]
       }
     ]
   }
 }
 ```
+
+_Note: initial plan draft used `{"matchers": [...], "command": "..."}` pattern which does not match Claude Code's actual hook schema (verified at `~/.claude/settings.json`). Revised during execution — %624 2026-04-16._
 
 - [ ] **Step 2: Manual smoke — confirm Claude Code picks up the hook**
 

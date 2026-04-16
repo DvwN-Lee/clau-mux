@@ -274,5 +274,5 @@ except: print('')
     _paste_fail_count=0
   fi
 
-  sleep 2
+  sleep 0.5
 done

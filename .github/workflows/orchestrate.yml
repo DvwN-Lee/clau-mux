@@ -3,20 +3,18 @@ name: orchestrate
 on:
   pull_request:
     paths:
-      - 'scripts/_orch.py'
-      - 'scripts/clmux_orchestrate.py'
-      - 'scripts/clmux_pipeline.py'
-      - 'tests/test_orchestrate*'
-      - 'tests/test_clmux_pipeline*'
+      - 'scripts/**'
+      - 'hooks/**'
+      - 'tests/**'
+      - 'settings.json'
       - '.github/workflows/orchestrate.yml'
   push:
     branches: [main]
     paths:
-      - 'scripts/_orch.py'
-      - 'scripts/clmux_orchestrate.py'
-      - 'scripts/clmux_pipeline.py'
-      - 'tests/test_orchestrate*'
-      - 'tests/test_clmux_pipeline*'
+      - 'scripts/**'
+      - 'hooks/**'
+      - 'tests/**'
+      - 'settings.json'
 
 jobs:
   test:
@@ -30,56 +28,32 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux zsh
       - name: Configure CI zsh (skip system rc traps)
         run: |
-          # Ubuntu's /etc/zsh/zshrc invokes interactive traps
-          # (zsh-newuser-install menu, compinit "insecure dirs [y/n]")
-          # that hang tmux-detached sessions and block graceful-shutdown
-          # keystrokes. NO_GLOBAL_RCS is zsh's documented option to skip
-          # /etc/zsh/zshrc, /etc/zsh/zprofile, /etc/zsh/zlogin entirely.
-          # It must be set in ~/.zshenv (sourced before /etc/zsh/zshrc).
           echo 'setopt NO_GLOBAL_RCS' > ~/.zshenv
-          # Belt-and-suspenders: empty user rc so zsh-newuser-install
-          # stays silent even if NO_GLOBAL_RCS ever regresses.
           touch ~/.zshrc
       - name: Install pytest
         run: python3 -m pip install --upgrade pip pytest
-      - name: Unit tests
-        run: python3 -m pytest tests/test_orchestrate.py -v
-      - name: Integration test
+      - name: Unit tests (all)
+        run: python3 -m pytest tests/ -v
+      - name: Integration test (orchestration)
         run: bash tests/test_orchestrate_integration.sh
         timeout-minutes: 2
-      - name: Pipeline tests (with failure diagnostic)
+      - name: Pipeline tests
         run: |
-          set -x
-          tmux -V
-          zsh --version
-          echo "--- HOME listing ---"
-          ls -la "$HOME"
-          echo "--- shell rc files ---"
-          for f in ~/.zshrc ~/.zshenv ~/.zprofile ~/.zlogin ~/.bashrc; do
-            if [[ -e "$f" ]]; then
-              echo "EXISTS: $f ($(wc -c <"$f") bytes)"
-            else
-              echo "MISSING: $f"
-            fi
-          done
-          set +x
-          export CLMUX_PIPELINE_TEST_DIAG=1
           ec=0
           bash tests/test_clmux_pipeline.sh || ec=$?
           if (( ec != 0 )); then
             echo "--- PIPELINE TEST FAILURE DIAGNOSTIC ---"
-            echo "exit code: $ec"
-            echo "--- tmux sessions ---"
             tmux list-sessions 2>&1 || true
             for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
               echo "=== session: $s ==="
-              tmux list-panes -t "$s" -F '#{pane_id} pid=#{pane_pid} cmd=#{pane_current_command} tty=#{pane_tty}' 2>&1 || true
-              echo "--- capture-pane (last 40 lines) ---"
-              tmux capture-pane -t "$s" -p -S -40 2>&1 || true
-              echo "--- /end $s ---"
+              tmux list-panes -t "$s" -F '#{pane_id} pid=#{pane_pid} cmd=#{pane_current_command}' 2>&1 || true
+              tmux capture-pane -t "$s" -p -S -20 2>&1 || true
             done
           else
             echo "pipeline tests OK"
           fi
           exit "$ec"
         timeout-minutes: 3
+      - name: Parity integration test
+        run: bash tests/test_parity_integration.sh
+        timeout-minutes: 2

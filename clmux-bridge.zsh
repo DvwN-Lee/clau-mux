@@ -97,7 +97,7 @@ cleanup() {
 trap 'cleanup; exit 0' INT TERM EXIT
 
 wait_for_idle || { echo "[clmux-bridge] error: CLI not ready (pattern: $IDLE_PATTERN)" >&2; exit 1; }
-echo "[clmux-bridge] ready — polling inbox every 2s (Ctrl+C to stop)"
+echo "[clmux-bridge] ready — polling inbox every 0.5s (Ctrl+C to stop)"
 
 _defer_count=0
 _paste_fail_count=0

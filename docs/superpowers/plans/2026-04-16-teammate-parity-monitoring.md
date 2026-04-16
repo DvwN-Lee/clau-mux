@@ -215,17 +215,6 @@ def test_emit_rejects_unknown_source(tmp_path, monkeypatch):
     raise AssertionError("expected EventSchemaError")
 
 
-def test_emit_timestamps_monotonic(tmp_path, monkeypatch):
-    events = _import_events(monkeypatch, tmp_path)
-    for i in range(3):
-        events.emit(event="teammate.spawned", source="bridge_daemon",
-                    teammate=f"t{i}", agent_type="bridge", backend="external-cli",
-                    tool=None, args={}, result={}, notes="")
-    lines = (tmp_path / ".claude" / "clmux" / "events.jsonl").read_text().splitlines()
-    ts = [json.loads(l)["ts"] for l in lines]
-    assert ts == sorted(ts)
-
-
 def test_emit_concurrent_writes_preserve_all(tmp_path, monkeypatch):
     import subprocess
     events = _import_events(monkeypatch, tmp_path)
@@ -263,7 +252,7 @@ def test_emit_null_session_id_and_team_ok(tmp_path, monkeypatch):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python3 -m pytest tests/test_events.py -v`
-Expected: 6 FAIL — `AttributeError: module '_events' has no attribute 'emit'` (and related)
+Expected: 5 FAIL — `AttributeError: module '_events' has no attribute 'emit'` (and related)
 
 - [ ] **Step 3: Implement emit + schema**
 
@@ -353,7 +342,7 @@ def emit(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python3 -m pytest tests/test_events.py -v`
-Expected: 6 PASS
+Expected: 5 PASS
 
 - [ ] **Step 5: Commit**
 
@@ -591,6 +580,10 @@ def _safe():
     elif tool == "SendMessage":
         to = tool_input.get("to")
         routing = (tool_response.get("routing") or {})
+        # [Safeguard] PostToolUse fires after the tool returns; it records the
+        # attempt, not whether the write succeeded. Flag tool-level errors so
+        # the analyzer can separate them from silently-dropped messages.
+        is_error = bool(tool_response.get("is_error"))
         args = {
             "from": routing.get("sender"),
             "to": to,
@@ -602,7 +595,7 @@ def _safe():
             event="teammate.message_sent", source="claude_code",
             teammate=to, agent_type=None, backend=None,
             tool=tool, args=args, result=tool_response,
-            notes="", session_id=session_id,
+            notes="send_error" if is_error else "", session_id=session_id,
         )
 
     elif tool == "TaskCreate":
@@ -644,34 +637,9 @@ git commit -m "feat(events): PostToolUse hook for Agent/TeamCreate/SendMessage/T
 
 **Files:**
 - Modify: `settings.json` (repo root — if absent, create)
-- Test: `tests/test_events.py` (schema check of settings)
+_No unit test — settings.json content is config, not code behavior. Verification is the manual smoke (Step 2) plus the integration test (Task 8) which exercises the hook script directly._
 
-- [ ] **Step 1: Add a test that settings.json has the hook wired**
-
-```python
-# Append to tests/test_events.py
-def test_settings_json_has_posttooluse_hook():
-    """Ensure the repo's settings.json registers emit_tool_event.py for PostToolUse."""
-    repo = Path(__file__).resolve().parent.parent
-    p = repo / "settings.json"
-    assert p.is_file(), "settings.json must exist at repo root"
-    cfg = json.loads(p.read_text())
-    hooks = cfg.get("hooks", {}).get("PostToolUse", [])
-    matched = [h for h in hooks if "emit_tool_event.py" in h.get("command", "")]
-    assert matched, "PostToolUse hook for emit_tool_event.py must be registered"
-    # Hook must apply to at least our five tools
-    matchers = matched[0].get("matchers", [])
-    expected = {"TeamCreate", "TeamDelete", "Agent", "SendMessage", "TaskCreate"}
-    assert expected.issubset(set(matchers)), \
-        f"matchers missing tools: {expected - set(matchers)}"
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `python3 -m pytest tests/test_events.py::test_settings_json_has_posttooluse_hook -v`
-Expected: FAIL — settings.json does not yet have PostToolUse
-
-- [ ] **Step 3: Add the hook config**
+- [ ] **Step 1: Add the hook config**
 
 If `settings.json` does not exist at repo root, create it with exactly this content. If it exists, merge the `hooks.PostToolUse` array additively.
 
@@ -688,22 +656,19 @@ If `settings.json` does not exist at repo root, create it with exactly this cont
 }
 ```
 
-- [ ] **Step 4: Run test + confirm hook is discovered by Claude Code**
+- [ ] **Step 2: Manual smoke — confirm Claude Code picks up the hook**
 
-Run: `python3 -m pytest tests/test_events.py::test_settings_json_has_posttooluse_hook -v`
-Expected: PASS
-
-Also verify manually that Claude Code recognizes the hook (no automated test — requires running Claude):
 ```bash
-# In a fresh claude session, after TeamCreate, confirm a line was appended:
+# In a fresh claude session, after running any TeamCreate, confirm a line
+# was appended:
 tail -1 ~/.claude/clmux/events.jsonl
 # Expected: {"ts": "...", "event": "team.created", "source": "claude_code", ...}
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add settings.json tests/test_events.py
+git add settings.json
 git commit -m "chore(events): register PostToolUse hook in settings.json"
 ```
 
@@ -1349,92 +1314,7 @@ git commit -m "test(events): end-to-end integration — hook + update_pane + hel
 
 ---
 
-## Task 9: Generate a live matrix + checkpoint doc
-
-**Files:**
-- Create: `docs/teammate-parity-matrix.md` (generated)
-
-- [ ] **Step 1: Generate against current `~/.claude/clmux/events.jsonl`**
-
-```bash
-# If no events yet, produce a note file explaining that:
-if [[ ! -s "$HOME/.claude/clmux/events.jsonl" ]]; then
-  mkdir -p docs
-  cat > docs/teammate-parity-matrix.md <<'EOF'
-# Teammate Parity Matrix
-
-**No events collected yet.** Use the repo for ≥1 day with:
-- `TeamCreate` calls
-- `Agent(subagent_type=...)` spawns (native teammates)
-- `clmux-<codex|gemini|copilot>` spawns (bridge teammates)
-- `SendMessage` between them
-
-Then re-run: `python3 scripts/analyze_events.py --output docs/teammate-parity-matrix.md`
-EOF
-else
-  python3 scripts/analyze_events.py --output docs/teammate-parity-matrix.md
-fi
-cat docs/teammate-parity-matrix.md
-```
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add docs/teammate-parity-matrix.md
-git commit -m "docs(parity): checkpoint matrix (generated)"
-```
-
----
-
-## Task 10: CHANGELOG + version + README note
-
-**Files:**
-- Modify: `CHANGELOG.md`
-- Modify: `package.json` (version bump 1.3.3 → 1.3.4)
-- Modify: `README.md` (one bullet)
-
-- [ ] **Step 1: Update `package.json`**
-
-Change the `"version"` line from `"1.3.3"` to `"1.3.4"`.
-
-- [ ] **Step 2: Prepend `CHANGELOG.md`**
-
-Add at top (after `# Changelog`):
-
-```markdown
-## 1.3.4 — 2026-04-16
-
-### Added
-- **Teammate parity observability (Phase B).** Append-only JSONL event log at `~/.claude/clmux/events.jsonl` captures teammate lifecycle across Claude-native (Agent-tool) and bridge (external-CLI) teammates via PostToolUse hook (`hooks/emit_tool_event.py`), update_pane emit, and bridge-daemon relay emit. Analyzer `scripts/analyze_events.py` produces `docs/teammate-parity-matrix.md` showing per-teammate lifecycle coverage and message-drop counts.
-- Schema-validated emitter (`scripts/_events.py`) — concurrent-safe via file_lock, closed set of 8 event kinds, 3 sources.
-
-### Tests
-- `tests/test_events.py` — 12 unit tests (schema, emit, hook, update_pane, zsh helper, settings registration).
-- `tests/test_analyze_events.py` — 3 analyzer tests.
-- `tests/test_parity_integration.sh` — end-to-end.
-
-### Scope
-- Phase B **observability only** — does not fix SendMessage-drop bug (Phase A/C gated on matrix output).
-```
-
-- [ ] **Step 3: Append README bullet**
-
-Find the feature list / docs list in `README.md` and append:
-
-```markdown
-- **Teammate parity observability** — lifecycle events logged to `~/.claude/clmux/events.jsonl`; run `python3 scripts/analyze_events.py --output docs/teammate-parity-matrix.md` to see coverage + message drops. See the [matrix](docs/teammate-parity-matrix.md).
-```
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add CHANGELOG.md package.json README.md
-git commit -m "chore: bump 1.3.4 + CHANGELOG + README for teammate parity observability"
-```
-
----
-
-## Task 11: Final smoke + PR prep
+## Task 9: Final smoke + PR prep
 
 **Files:** (no code changes)
 
@@ -1445,7 +1325,7 @@ cd /Users/idongju/Desktop/Git/clau-mux/.worktrees/parity-plan
 python3 -m pytest tests/test_events.py tests/test_analyze_events.py -v
 bash tests/test_parity_integration.sh
 ```
-Expected: 15 unit tests PASS + integration PASS
+Expected: ~13 unit tests PASS + integration PASS (10 events + 3 analyzer; exact count depends on final test additions per task)
 
 - [ ] **Step 2: Run existing test suites (no regression)**
 
@@ -1462,61 +1342,57 @@ git push -u origin docs/teammate-parity-plan
 gh pr create --base main --head docs/teammate-parity-plan \
   --title "feat(events): teammate parity observability (Phase B)" \
   --body "$(cat <<'EOF'
-Phase B of the teammate parity work (planning doc + Phase B implementation in one PR per user guidance).
+Phase B of the teammate parity work — observability infrastructure only.
 
 ## Scope
-Observability only. Captures native (Agent-tool) + bridge (external-CLI) teammate lifecycle events to `~/.claude/clmux/events.jsonl` and produces a markdown parity matrix showing lifecycle coverage gaps and message drops.
+Captures native (Agent-tool) + bridge (external-CLI) teammate lifecycle events to `~/.claude/clmux/events.jsonl` and provides an analyzer that produces a markdown parity matrix showing lifecycle coverage gaps and message drops.
 
 ## Key additions
 - `scripts/_events.py` — schema-validated append-only emitter
-- `hooks/emit_tool_event.py` — PostToolUse for Agent/TeamCreate/TeamDelete/SendMessage/TaskCreate
+- `hooks/emit_tool_event.py` — PostToolUse for Agent/TeamCreate/TeamDelete/SendMessage/TaskCreate (with `is_error` safeguard — see Task 3)
 - `scripts/_events_zsh_helper.py` — shell-callable emitter
-- `scripts/analyze_events.py` — matrix builder
+- `scripts/analyze_events.py` — matrix builder (on-demand)
 - Instrumented `scripts/update_pane.py` + `clmux-bridge.zsh`
 - `settings.json` — hook registration
 
 ## Non-goals (explicitly deferred)
 - Does NOT fix SendMessage-drop bug
 - Does NOT register bridges in `agentNameRegistry`
-- Those are Phase A / Phase C decisions once the matrix shows concrete gaps
+- Does NOT generate a committed matrix doc (run analyzer on demand)
+- Does NOT bump version / CHANGELOG / README (Phase A/C ships that together with fixes)
 
 ## Tests
-- 12 unit (events) + 3 unit (analyzer) + 1 integration = 16 new tests
-- 78 + 13 existing tests unaffected
+- ~13 new unit + 1 integration. 78 + 13 existing tests unaffected.
 
 ## Follow-up
-Use the repo normally for ≥1 day; re-run `scripts/analyze_events.py` to update `docs/teammate-parity-matrix.md`. Matrix + drops count is the Phase A/C decision input.
+Use the repo normally for ≥1 day; run `scripts/analyze_events.py --output /tmp/parity.md` on demand. The matrix + drops count is the Phase A/C decision input.
 EOF
 )"
-```
-
-- [ ] **Step 4: Report PR URL to Lead (%105)**
-
-Use paste-buffer (not SendMessage — the drop bug is exactly what this plan observes):
-
-```bash
-cat > /tmp/parity-done.txt <<EOF
-[parity-plan → Lead %105] Phase B delivered — PR #<N>
-Tests: 16 new + 91 existing PASS.
-Matrix: docs/teammate-parity-matrix.md (checkpoint; populates after ≥1 day of usage).
-EOF
-tmux load-buffer /tmp/parity-done.txt
-tmux paste-buffer -p -t %105
-tmux send-keys -t %105 Enter
 ```
 
 ---
 
 ## Self-Review Notes
 
-**Spec coverage:**
-- PostToolUse instrumentation for all 5 tools — Tasks 3, 4 ✓
+**Revision note (efficiency review, 2026-04-16):** Cut 3 tasks + 2 tests based on Sonnet cross-review.
+- Task 4's settings-json content test — config, not behavior. Smoke-verified + exercised in Task 8.
+- Task 9 (generated matrix checkpoint doc) — analyzer is on-demand; committed placeholder is stale by definition.
+- Task 10 (CHANGELOG + version bump + README) — Phase A/C will ship that along with actual fixes.
+- Task 11 Step 4 (paste-buffer Lead report) — unreliable path (subject to the very SendMessage bug under observation).
+- `test_emit_timestamps_monotonic` — wall-clock monotonicity is flake-prone, no parity signal.
+
+Added: `is_error` safeguard in Task 3 SendMessage branch (flags PostToolUse records where the tool itself reported failure, so the analyzer can separate those from silent drops).
+
+**Spec coverage (after cuts):**
+- PostToolUse instrumentation for all 5 tools — Task 3 ✓
+- Settings.json hook registration — Task 4 ✓ (smoke + Task 8 integration verify)
 - Bridge-side emission in update_pane + bridge daemon — Tasks 5, 6 ✓
 - Concurrent-safe append — Task 2 (file_lock + sigterm_guard, test_emit_concurrent_writes_preserve_all) ✓
 - Schema validation — Task 2 (closed set of events + sources) ✓
-- Analyzer + matrix — Tasks 7, 9 ✓
+- Analyzer + on-demand matrix — Task 7 ✓
 - End-to-end test — Task 8 ✓
-- Phase A/C scope explicitly excluded — header + Task 10 CHANGELOG ✓
+- `is_error` safeguard — Task 3 ✓
+- Phase A/C scope explicitly excluded — header + Task 9 PR body ✓
 
 **Placeholder scan:** none found.
 

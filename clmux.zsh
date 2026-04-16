@@ -766,13 +766,18 @@ clmux-chain-check() {
 # clmux-chain-map — JSON snapshot of all chain-registered panes. Master uses
 # this for on-demand monitoring; leaves/mids don't need it.
 clmux-chain-map() {
-  tmux list-panes -a -F '#{pane_id}' | while read -r p; do
-    local role
+  local entries=()
+  local p role up down
+  for p in $(tmux list-panes -a -F '#{pane_id}'); do
     role=$(tmux show-options -p -t "$p" -v @clmux-chain-role 2>/dev/null)
     [[ -z "$role" ]] && continue
-    local up down
     up=$(tmux show-options -p -t "$p" -v @clmux-chain-peer-up 2>/dev/null)
     down=$(tmux show-options -p -t "$p" -v @clmux-chain-peer-down 2>/dev/null)
-    python3 -c "import json,sys; print(json.dumps({'pane':'$p','role':'$role','peer_up':'$up','peer_down':'$down'}))"
-  done | python3 -c "import json,sys; print(json.dumps([json.loads(l) for l in sys.stdin if l.strip()], indent=2))"
+    entries+=("{\"pane\":\"$p\",\"role\":\"$role\",\"peer_up\":\"${up:-}\",\"peer_down\":\"${down:-}\"}")
+  done
+  if (( ${#entries} == 0 )); then
+    echo "[]"
+  else
+    printf '%s\n' "${entries[@]}" | python3 -c "import json,sys; print(json.dumps([json.loads(l) for l in sys.stdin if l.strip()], indent=2))"
+  fi
 }

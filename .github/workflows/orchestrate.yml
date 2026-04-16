@@ -28,6 +28,8 @@ jobs:
           python-version: '3.11'
       - name: Install tmux + zsh (for integration tests)
         run: sudo apt-get update && sudo apt-get install -y tmux zsh
+      - name: Suppress zsh-newuser-install (CI has no rc files)
+        run: touch ~/.zshrc
       - name: Install pytest
         run: python3 -m pip install --upgrade pip pytest
       - name: Unit tests
@@ -52,21 +54,22 @@ jobs:
           done
           set +x
           export CLMUX_PIPELINE_TEST_DIAG=1
-          if bash tests/test_clmux_pipeline.sh; then
+          ec=0
+          bash tests/test_clmux_pipeline.sh || ec=$?
+          if (( ec != 0 )); then
+            echo "--- PIPELINE TEST FAILURE DIAGNOSTIC ---"
+            echo "exit code: $ec"
+            echo "--- tmux sessions ---"
+            tmux list-sessions 2>&1 || true
+            for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+              echo "=== session: $s ==="
+              tmux list-panes -t "$s" -F '#{pane_id} pid=#{pane_pid} cmd=#{pane_current_command} tty=#{pane_tty}' 2>&1 || true
+              echo "--- capture-pane (last 40 lines) ---"
+              tmux capture-pane -t "$s" -p -S -40 2>&1 || true
+              echo "--- /end $s ---"
+            done
+          else
             echo "pipeline tests OK"
-            exit 0
           fi
-          ec=$?
-          echo "--- PIPELINE TEST FAILURE DIAGNOSTIC ---"
-          echo "exit code: $ec"
-          echo "--- tmux sessions ---"
-          tmux list-sessions 2>&1 || true
-          for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
-            echo "=== session: $s ==="
-            tmux list-panes -t "$s" -F '#{pane_id} pid=#{pane_pid} cmd=#{pane_current_command} tty=#{pane_tty}' 2>&1 || true
-            echo "--- capture-pane (last 40 lines) ---"
-            tmux capture-pane -t "$s" -p -S -40 2>&1 || true
-            echo "--- /end $s ---"
-          done
           exit "$ec"
         timeout-minutes: 3

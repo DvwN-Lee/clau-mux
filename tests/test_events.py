@@ -208,3 +208,27 @@ def test_hook_tolerates_malformed_json(tmp_path, monkeypatch):
         input="{not json", text=True, env=env, capture_output=True,
     )
     assert r.returncode == 0, r.stderr
+
+
+def test_update_pane_emits_teammate_spawned(tmp_path, monkeypatch):
+    import subprocess
+    team_dir = tmp_path / ".claude" / "teams" / "probe"
+    team_dir.mkdir(parents=True)
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    r = subprocess.run([
+        "python3", str(SCRIPTS / "update_pane.py"),
+        str(team_dir), "codex-probe", "%999", "codex-cli", "0",
+    ], text=True, env=env, capture_output=True)
+    assert r.returncode == 0, r.stderr
+
+    lines = (tmp_path / ".claude" / "clmux" / "events.jsonl").read_text().splitlines()
+    recs = [json.loads(l) for l in lines]
+    spawned = [r for r in recs if r["event"] == "teammate.spawned" and r["source"] == "update_pane"]
+    assert len(spawned) == 1
+    s = spawned[0]
+    assert s["teammate"] == "codex-probe"
+    assert s["backend"] == "external-cli"
+    assert s["agent_type"] == "bridge"
+    assert s["team_name"] == "probe"
+    assert s["args"]["pane_id"] == "%999"

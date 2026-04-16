@@ -40,3 +40,23 @@ except FileNotFoundError as e:
     # update. Spawner will see this as a non-fatal warning.
     print(f"update_pane: team dir gone, skipping: {e}", file=sys.stderr)
     sys.exit(0)
+
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _events
+    _events.emit(
+        event="teammate.spawned",
+        source="update_pane",
+        teammate=agent_name,
+        agent_type="bridge",
+        backend="external-cli",
+        tool=None,
+        args={"pane_id": pane_id, "cli_cmd": cli_cmd, "task_capable": task_capable},
+        result={},
+        notes="",
+        session_id=None,
+        team_name=team_name,
+        agent_id=f"{agent_name}@{team_name}",
+    )
+except Exception as _e:
+    print(f"update_pane: _events.emit failed: {_e}", file=sys.stderr)

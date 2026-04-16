@@ -187,6 +187,19 @@ except: print('')
     tmux send-keys -t "$PANE_ID" C-u
     sleep 0.05
 
+    # Codex-specific message framing. Codex's instruction-following for the
+    # system prompt's "every response must call write_to_lead" rule is
+    # weaker than Gemini's — empirical tests show it skips write_to_lead
+    # for conversational/identity questions lacking explicit tool mention.
+    # Prefix frames the message as a bridge-delivered request with the
+    # explicit trigger phrase "via write_to_lead" (which we verified makes
+    # codex call the tool). Gemini/Copilot are not wrapped — they comply
+    # without this hint and wrapping wastes tokens for them.
+    if [[ "$AGENT_NAME" == codex* ]]; then
+      text="[Bridge message — reply via write_to_lead]
+$text"
+    fi
+
     # Delivery: chunked paste-buffer for large msgs, single paste for small.
     # paste-buffer uses bracketed paste (\e[200~...\e[201~) which protects newlines
     # from being interpreted as Enter. But Gemini CLI truncates at ~1024 bytes per

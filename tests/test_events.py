@@ -232,3 +232,27 @@ def test_update_pane_emits_teammate_spawned(tmp_path, monkeypatch):
     assert s["agent_type"] == "bridge"
     assert s["team_name"] == "probe"
     assert s["args"]["pane_id"] == "%999"
+
+
+def test_bridge_relay_emits_message_delivered_via_helper(tmp_path, monkeypatch):
+    import subprocess
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    r = subprocess.run([
+        "python3", str(SCRIPTS / "_events_zsh_helper.py"),
+        "teammate.message_delivered",
+        "--source", "bridge_daemon",
+        "--teammate", "codex-ci-debug",
+        "--team-name", "probe",
+        "--backend", "external-cli",
+        "--agent-type", "bridge",
+        "--note", "inbox relay",
+    ], text=True, env=env, capture_output=True)
+    assert r.returncode == 0, r.stderr
+
+    lines = (tmp_path / ".claude" / "clmux" / "events.jsonl").read_text().splitlines()
+    recs = [json.loads(l) for l in lines]
+    delivered = [r for r in recs if r["event"] == "teammate.message_delivered"]
+    assert len(delivered) == 1
+    assert delivered[0]["teammate"] == "codex-ci-debug"
+    assert delivered[0]["source"] == "bridge_daemon"

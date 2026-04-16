@@ -56,45 +56,59 @@ def _rescue(session_id):
     if not os.path.isdir(default_inboxes):
         return
 
-    # Collect all JSON files under default/inboxes/<owner>/
+    # Collect JSON files — handle BOTH flat layout (default/inboxes/<name>.json)
+    # and nested layout (default/inboxes/<owner>/<file>.json).
+    # Real SendMessage mis-route creates flat files; handle both for safety.
     rescued_count = 0
-    for owner_dir in os.listdir(default_inboxes):
-        owner_path = os.path.join(default_inboxes, owner_dir)
-        if not os.path.isdir(owner_path):
-            continue
-        json_files = [f for f in os.listdir(owner_path) if f.endswith(".json")]
-        if not json_files:
-            continue
 
-        # Find active team
-        team_name, team_path = _active_team_for_session(session_id)
-        if not team_name:
+    team_name, team_path = _active_team_for_session(session_id)
+    if not team_name:
+        orphans = [f for f in os.listdir(default_inboxes) if f.endswith(".json")]
+        if orphans:
             print(
-                f"[rescue-default-inbox] WARNING: found {len(json_files)} orphan "
-                f"message(s) in teams/default/inboxes/{owner_dir}/ but no active "
+                f"[rescue-default-inbox] WARNING: found {len(orphans)} orphan "
+                f"message(s) in teams/default/inboxes/ but no active "
                 f"team for session {session_id!r}",
                 file=sys.stderr,
             )
-            continue
+        return
 
-        # Ensure target inbox exists
-        target_dir = os.path.join(team_path, "inboxes", owner_dir)
-        os.makedirs(target_dir, exist_ok=True)
+    target_inboxes = os.path.join(team_path, "inboxes")
+    os.makedirs(target_inboxes, exist_ok=True)
 
-        for fname in json_files:
-            src = os.path.join(owner_path, fname)
-            dst = os.path.join(target_dir, fname)
+    for entry in os.listdir(default_inboxes):
+        src = os.path.join(default_inboxes, entry)
 
-            # Avoid overwriting — if dst exists, use a unique name
+        # Flat file: default/inboxes/<name>.json → active/inboxes/<name>.json
+        if os.path.isfile(src) and entry.endswith(".json"):
+            dst = os.path.join(target_inboxes, entry)
             if os.path.exists(dst):
-                base, ext = os.path.splitext(fname)
+                base, ext = os.path.splitext(entry)
                 dst = os.path.join(
-                    target_dir,
+                    target_inboxes,
                     f"{base}_rescued_{int(time.time() * 1000)}{ext}",
                 )
-
             shutil.move(src, dst)
             rescued_count += 1
+
+        # Nested dir: default/inboxes/<owner>/*.json → active/inboxes/<owner>/*.json
+        elif os.path.isdir(src):
+            json_files = [f for f in os.listdir(src) if f.endswith(".json")]
+            if not json_files:
+                continue
+            target_dir = os.path.join(target_inboxes, entry)
+            os.makedirs(target_dir, exist_ok=True)
+            for fname in json_files:
+                fsrc = os.path.join(src, fname)
+                fdst = os.path.join(target_dir, fname)
+                if os.path.exists(fdst):
+                    base, ext = os.path.splitext(fname)
+                    fdst = os.path.join(
+                        target_dir,
+                        f"{base}_rescued_{int(time.time() * 1000)}{ext}",
+                    )
+                shutil.move(fsrc, fdst)
+                rescued_count += 1
 
     if rescued_count > 0:
         print(

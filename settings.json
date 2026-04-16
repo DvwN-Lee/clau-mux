@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "TeamCreate|TeamDelete|Agent|SendMessage|TaskCreate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/emit_tool_event.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

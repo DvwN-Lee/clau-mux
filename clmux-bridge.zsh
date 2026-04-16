@@ -259,6 +259,17 @@ except: print('')
     done
     [[ "$_enter_ok" == false ]] && echo "[clmux-bridge] error: Enter not accepted after 5 retries" >&2
 
+    # Emit teammate.message_delivered event (parity monitoring)
+    python3 "$CLMUX_DIR/scripts/_events_zsh_helper.py" \
+        teammate.message_delivered \
+        --source bridge_daemon \
+        --teammate "$AGENT_NAME" \
+        --team-name "$(basename "$TEAM_DIR")" \
+        --agent-type bridge \
+        --backend external-cli \
+        --pane-id "$PANE_ID" \
+        --note "inbox relay" 2>/dev/null || true
+
     [[ -n "$ts" ]] && mark_read "$ts"
     _paste_fail_count=0
   fi

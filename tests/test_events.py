@@ -100,3 +100,111 @@ def test_emit_null_session_id_and_team_ok(tmp_path, monkeypatch):
     rec = json.loads(lines[0])
     assert rec["session_id"] is None
     assert rec["team_name"] is None
+
+
+HOOKS = Path(__file__).resolve().parent.parent / "hooks"
+
+
+def test_hook_team_create_emits_team_created(tmp_path, monkeypatch):
+    import subprocess
+    payload = json.dumps({
+        "hook_event_name": "PostToolUse",
+        "session_id": "s-1",
+        "tool_name": "TeamCreate",
+        "tool_input": {"team_name": "demo"},
+        "tool_response": {"team_name": "demo", "team_file_path": "/tmp/demo/config.json"},
+    })
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    r = subprocess.run(
+        ["python3", str(HOOKS / "emit_tool_event.py")],
+        input=payload, text=True, env=env, capture_output=True,
+    )
+    assert r.returncode == 0, r.stderr
+    lines = (tmp_path / ".claude" / "clmux" / "events.jsonl").read_text().splitlines()
+    recs = [json.loads(l) for l in lines]
+    team_events = [r for r in recs if r["event"] == "team.created"]
+    assert len(team_events) == 1
+    assert team_events[0]["team_name"] == "demo"
+    assert team_events[0]["session_id"] == "s-1"
+    assert team_events[0]["source"] == "claude_code"
+
+
+def test_hook_agent_spawn_emits_registered_and_spawned(tmp_path, monkeypatch):
+    import subprocess
+    payload = json.dumps({
+        "hook_event_name": "PostToolUse",
+        "session_id": "s-2",
+        "tool_name": "Agent",
+        "tool_input": {"subagent_type": "general-purpose", "description": "x",
+                       "prompt": "...", "name": "helper-1", "model": "sonnet"},
+        "tool_response": {"agent_id": "helper-1@demo"},
+    })
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    r = subprocess.run(
+        ["python3", str(HOOKS / "emit_tool_event.py")],
+        input=payload, text=True, env=env, capture_output=True,
+    )
+    assert r.returncode == 0, r.stderr
+    recs = [json.loads(l) for l in (tmp_path / ".claude" / "clmux" / "events.jsonl")
+            .read_text().splitlines()]
+    events = {r["event"] for r in recs}
+    assert "teammate.registered" in events
+    assert "teammate.spawned" in events
+
+
+def test_hook_sendmessage_emits_message_sent(tmp_path, monkeypatch):
+    import subprocess
+    payload = json.dumps({
+        "hook_event_name": "PostToolUse",
+        "session_id": "s-3",
+        "tool_name": "SendMessage",
+        "tool_input": {"to": "codex-worker", "message": "hi", "summary": "ping"},
+        "tool_response": {"success": True,
+                          "routing": {"sender": "team-lead", "target": "@codex-worker"}},
+    })
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    r = subprocess.run(
+        ["python3", str(HOOKS / "emit_tool_event.py")],
+        input=payload, text=True, env=env, capture_output=True,
+    )
+    assert r.returncode == 0, r.stderr
+    recs = [json.loads(l) for l in (tmp_path / ".claude" / "clmux" / "events.jsonl")
+            .read_text().splitlines()]
+    send = [r for r in recs if r["event"] == "teammate.message_sent"]
+    assert len(send) == 1
+    assert send[0]["teammate"] == "codex-worker"
+    assert send[0]["args"]["from"] == "team-lead"
+
+
+def test_hook_tolerates_unknown_tool_name(tmp_path, monkeypatch):
+    import subprocess
+    payload = json.dumps({
+        "hook_event_name": "PostToolUse",
+        "session_id": "s-4",
+        "tool_name": "SomeFutureTool",
+        "tool_input": {},
+        "tool_response": {},
+    })
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    r = subprocess.run(
+        ["python3", str(HOOKS / "emit_tool_event.py")],
+        input=payload, text=True, env=env, capture_output=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert not (tmp_path / ".claude" / "clmux" / "events.jsonl").exists(), \
+        "hook should not emit for tools outside the watchlist"
+
+
+def test_hook_tolerates_malformed_json(tmp_path, monkeypatch):
+    import subprocess
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    r = subprocess.run(
+        ["python3", str(HOOKS / "emit_tool_event.py")],
+        input="{not json", text=True, env=env, capture_output=True,
+    )
+    assert r.returncode == 0, r.stderr

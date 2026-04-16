@@ -178,6 +178,15 @@ except: print('')
     fi
     _defer_count=0
 
+    # Pre-paste input clear: send Ctrl-U to wipe any pre-existing draft
+    # text in the receiving CLI's input box. Necessary because some CLIs
+    # (codex confirmed, others suspected) may carry a draft from prior
+    # session state into the first turn of a new spawn — the bridge paste
+    # then appends to that stale draft and Enter submits the concatenated
+    # text as one message. Empty input + Ctrl-U is a harmless no-op.
+    tmux send-keys -t "$PANE_ID" C-u
+    sleep 0.05
+
     # Delivery: chunked paste-buffer for large msgs, single paste for small.
     # paste-buffer uses bracketed paste (\e[200~...\e[201~) which protects newlines
     # from being interpreted as Enter. But Gemini CLI truncates at ~1024 bytes per

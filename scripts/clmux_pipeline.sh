@@ -132,8 +132,11 @@ cmd_create() {
     _validate_name "$name"
     _require_tmux
 
-    # Create tmux session
-    tmux new-session -d -s "$name" -c "$cwd" "exec zsh"
+    # Create tmux session.
+    # `exec zsh -i` forces interactive mode regardless of TTY detection —
+    # tmux in `-d` (detached) mode may spawn zsh non-interactively on
+    # stricter zsh builds (Ubuntu 5.8), breaking `send-keys "exit" Enter`.
+    tmux new-session -d -s "$name" -c "$cwd" "exec zsh -i"
 
     # Store creation timestamp
     tmux set-option -t "$name" @pipeline_created_at "$(date +%s)"
@@ -248,7 +251,11 @@ cmd_shutdown() {
                 tmux send-keys -t "$pane_id" "/exit" Enter 2>/dev/null || true
                 ;;
             zsh|bash|fish|sh)
-                tmux send-keys -t "$pane_id" "exit" Enter 2>/dev/null || true
+                # C-d (EOF) instead of "exit" Enter:
+                # - Delivered at pty level, bypasses ZLE/readline readiness race
+                # - Deterministic on Ubuntu zsh 5.8 + tmux 3.2a (CI)
+                # - Same semantic on macOS zsh 5.9
+                tmux send-keys -t "$pane_id" C-d 2>/dev/null || true
                 ;;
             *)
                 tmux send-keys -t "$pane_id" C-d 2>/dev/null || true

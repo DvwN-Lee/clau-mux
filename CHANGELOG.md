@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.3 — 2026-04-15
+
+### CI
+- `.github/workflows/orchestrate.yml` now runs `tests/test_clmux_pipeline.sh` on
+  PR/push so regressions in the pipeline wrapper are caught before merge. Path
+  triggers extended to include `scripts/clmux_pipeline.py` and
+  `tests/test_clmux_pipeline*`.
+
+### Docs
+- `docs/orchestration.md` — added **Runtime silencing** section documenting
+  `CLMUX_ORCH_NO_NOTIFY=1` for headless / demo / automated-script operators.
+  Previously only mentioned in the 1.3.1 test-isolation context.
+- `docs/investigations/issue-10-outbox-rmw.md` — investigation report
+  concluding that the bridge outbox RMW race (Issue #10) was fixed in
+  commit `ef2cdcd` (`withLock()` mkdir-mutex around `writeToLeadImpl`'s
+  read-modify-write sequence). Recommend closing Issue #10.
+
 ## 1.3.2 — 2026-04-15
 
 ### Added

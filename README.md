@@ -89,6 +89,16 @@ git clone https://github.com/DvwN-Lee/clau-mux.git ~/clau-mux
 source ~/.zshrc
 ```
 
+### Prompt 업데이트
+
+`prompt/AGENTS.md`, `GEMINI.md`, `COPILOT.md` 가 변경된 후 `git pull` 했다면, 설치된 사본을 갱신해야 합니다:
+
+```bash
+~/clau-mux/scripts/install-prompts.sh
+```
+
+`setup.sh` 와 달리 비대화형이며 prompt 영역만 갱신합니다 (tmux/MCP 설정은 건드리지 않음). 실행 중인 bridge teammate는 재시작해야 새 prompt가 반영됩니다.
+
 ### 특정 teammate 제거
 
 특정 teammate만 비활성화하거나 전체를 제거할 수 있습니다:
@@ -229,6 +239,8 @@ clmux-copilot-stop -t <team_name>
 자세한 내용은 [Copilot Teammate 상세](docs/copilot-teammate.md)를 참고하세요.
 
 > **참고**: `clmux -c`로 스폰 시 `copilot --yolo` 플래그, `clmux-copilot`으로 스폰 시 `copilot --allow-all-tools` 플래그가 사용됩니다.
+
+> **모델 호환성 (2026-04 기준)**: GitHub이 `gpt-5.1` 계열을 deprecate(2026-04-01)했고, `claude-sonnet-4.5` 도 백엔드 400 에러로 사용 불가 ([copilot-cli#2597](https://github.com/github/copilot-cli/issues/2597)). Copilot 시작 시 `model_not_supported` 에러가 발생하면 `~/.copilot/config.json` 의 `model` 을 `claude-sonnet-4.6`, `gpt-5.3-codex`, 또는 `gemini-3-pro` 등 [지원 모델](https://docs.github.com/en/copilot/reference/ai-models/supported-models) 로 변경하세요.
 
 #### 전체 워크플로우 예시
 

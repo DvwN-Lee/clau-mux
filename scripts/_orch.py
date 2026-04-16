@@ -637,10 +637,35 @@ def mark_inbox_read(pane_id: str) -> None:
             path.unlink()
 
 
-# ─── notify (tmux paste-buffer) ─────────────────────────────────────────────
+# ─── notify (idle-aware tmux alert) ─────────────────────────────────────────
+#
+# [Phase 2 #14 per 2026-04-15] `notify_pane` previously pasted blindly into
+# the target pane. That corrupted Claude Code panes (paste absorbed as user
+# input) and polluted interactive prompts on editors / REPLs. Notify is now
+# idle-aware:
+#
+#   - Detect `pane_current_command` via `tmux display-message -p`.
+#   - Shell (zsh/bash/fish/sh)   → paste as before (prefix `# orch:` is a
+#                                  comment, harmless at the prompt).
+#   - Claude Code (claude/node)  → set tmux option `@orch_last_alert` so the
+#                                  alert surfaces via the status line without
+#                                  touching the input box.
+#   - Anything else / detection failure → skip; the alert is still durable in
+#                                  `inbox/<pane>.jsonl` (written by the CLI
+#                                  before `notify_pane` is called).
+#
+# Operator escape hatches:
+#   CLMUX_ORCH_NO_NOTIFY=1         — short-circuit entirely (test isolation).
+#   CLMUX_ORCH_NOTIFY_MODE=MODE    — force a specific mode, one of:
+#                                    auto (default) | paste | status | skip.
 
 import shutil
 import subprocess
+
+
+_PASTE_SHELLS = {"zsh", "bash", "fish", "sh", "dash", "ksh"}
+_STATUS_COMMANDS = {"claude", "node"}
+_VALID_MODES = {"auto", "paste", "status", "skip"}
 
 
 def _tmux_load_buffer(buf_name: str, data: str) -> None:
@@ -652,24 +677,43 @@ def _tmux_load_buffer(buf_name: str, data: str) -> None:
     )
 
 
-def notify_pane(target_pane: str, message: str, buf_prefix: str = "orch") -> bool:
-    """Paste a single-line alert into target_pane followed by Enter.
+def _pane_current_command(pane: str) -> str:
+    """Return `#{pane_current_command}` for `pane`, or "" on failure.
 
-    Uses `paste-buffer -p` (bracketed paste) so newlines remain literal
-    and a runaway message can't inject multiple keypresses.
-
-    [Test isolation] If env var CLMUX_ORCH_NO_NOTIFY=1, returns False
-    immediately without invoking tmux. This lets TestCLI (which spawns
-    subprocesses that would otherwise hit the operator's real tmux
-    server) run hermetically. Also useful for operators who want to
-    temporarily silence pane notifications.
-
-    Returns True on success, False if tmux is unavailable or suppressed.
+    Failure modes mapped to "" (caller treats "" as skip):
+      - tmux returns non-zero
+      - subprocess raises (TimeoutExpired, OSError, CalledProcessError, …)
     """
-    if os.environ.get("CLMUX_ORCH_NO_NOTIFY") == "1":
-        return False
-    if shutil.which("tmux") is None:
-        return False
+    try:
+        r = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", pane,
+             "#{pane_current_command}"],
+            capture_output=True, text=True, timeout=2,
+        )
+    except Exception:
+        return ""
+    if r.returncode != 0:
+        return ""
+    return (r.stdout or "").strip()
+
+
+def _choose_notify_mode(cmd: str) -> str:
+    """Map a foreground command name to a notify mode.
+
+    Returns one of: "paste", "status", "skip".
+    """
+    if cmd in _STATUS_COMMANDS:
+        return "status"
+    if cmd in _PASTE_SHELLS:
+        return "paste"
+    return "skip"
+
+
+def _notify_via_paste(target_pane: str, message: str, buf_prefix: str) -> bool:
+    """Paste `message` + Enter into `target_pane` via tmux buffer.
+
+    Identical to the pre-Phase-2 behavior. Caller decides when this is safe.
+    """
     buf = f"{buf_prefix}-{os.getpid()}-{secrets.token_hex(4)}"
     try:
         _tmux_load_buffer(buf, message)
@@ -684,6 +728,63 @@ def notify_pane(target_pane: str, message: str, buf_prefix: str = "orch") -> boo
         return True
     except subprocess.CalledProcessError:
         return False
+
+
+def _notify_via_status(target_pane: str, message: str) -> bool:
+    """Store alert on tmux option `@orch_last_alert` (truncated to 80 chars).
+
+    A status-line format referencing `@orch_last_alert` will then surface the
+    alert without touching the input buffer. `display-message` is also fired
+    as a best-effort visual flash — failure there is non-fatal.
+    """
+    try:
+        subprocess.run(
+            ["tmux", "set-option", "-t", target_pane,
+             "@orch_last_alert", message[:80]],
+            check=True, timeout=2,
+        )
+    except Exception:
+        return False
+    try:
+        subprocess.run(
+            ["tmux", "display-message", "-t", target_pane,
+             f"orch: {message[:60]}"],
+            check=False, timeout=2,
+        )
+    except Exception:
+        pass
+    return True
+
+
+def notify_pane(target_pane: str, message: str, buf_prefix: str = "orch") -> bool:
+    """Deliver an idle-aware alert to `target_pane`.
+
+    See the `notify` section header above for the full decision tree.
+
+    Returns True when a notification was actually emitted (paste or status),
+    False when suppressed, skipped, or tmux itself is unavailable.
+    """
+    if os.environ.get("CLMUX_ORCH_NO_NOTIFY") == "1":
+        return False
+    if shutil.which("tmux") is None:
+        return False
+
+    mode_env = os.environ.get("CLMUX_ORCH_NOTIFY_MODE", "auto").strip().lower()
+    if mode_env not in _VALID_MODES:
+        mode_env = "auto"
+
+    if mode_env == "auto":
+        mode = _choose_notify_mode(_pane_current_command(target_pane))
+    else:
+        mode = mode_env
+
+    if mode == "skip":
+        return False
+    if mode == "status":
+        return _notify_via_status(target_pane, message)
+    if mode == "paste":
+        return _notify_via_paste(target_pane, message, buf_prefix)
+    return False
 
 
 # ─── meeting (lifecycle + WORM archive) ─────────────────────────────────────

@@ -642,6 +642,10 @@ class TestNotify:
 
         # [B2] Fake tmux availability
         monkeypatch.setattr(orch.shutil, "which", lambda cmd: "/usr/bin/tmux")
+        # [Phase 2 #14] Force idle-shell detection so the paste path is
+        # exercised; without this the mocked subprocess.run returns stdout=""
+        # and notify_pane would route to skip.
+        monkeypatch.setattr(orch, "_pane_current_command", lambda pane: "zsh")
 
         def fake_run(args, **kwargs):
             recorded.append(tuple(args))
@@ -720,6 +724,147 @@ class TestNotify:
         ok = orch.notify_pane("%105", "should not be sent")
         assert ok is False
         assert calls == []  # no tmux invocation
+
+    # ── [Phase 2 #14] idle-aware notify ────────────────────────────────────
+
+    def _fake_run_recorder(self, calls):
+        """Return a fake subprocess.run that records args and returns success."""
+        def fake_run(args, **kw):
+            calls.append(tuple(args))
+            class R:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return R()
+        return fake_run
+
+    def test_notify_skips_paste_when_claude_code_detected(self, tmp_path, monkeypatch):
+        """[Phase 2 #14] When target pane runs `claude` (Claude Code),
+        notify_pane MUST NOT paste — bracketed-paste would be absorbed into
+        the user-input box. Instead, routes through status-line mode so the
+        alert is surfaced without corrupting the input buffer.
+        """
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        monkeypatch.setattr(orch.shutil, "which", lambda cmd: "/usr/bin/tmux")
+        monkeypatch.setattr(orch, "_pane_current_command", lambda pane: "claude")
+        calls = []
+        monkeypatch.setattr(orch.subprocess, "run", self._fake_run_recorder(calls))
+        monkeypatch.setattr(orch, "_tmux_load_buffer",
+                            lambda buf, data: calls.append(("load-buffer", buf)))
+
+        ok = orch.notify_pane("%105", "# orch:delegate thread=t-001")
+
+        assert not any("paste-buffer" in str(c) for c in calls), \
+            f"Claude Code pane was pasted into: {calls}"
+        assert not any("load-buffer" in str(c) for c in calls)
+        assert any("set-option" in str(c) and "@orch_last_alert" in str(c)
+                   for c in calls), f"Expected @orch_last_alert set, got: {calls}"
+        assert ok is True
+
+    def test_notify_pastes_when_zsh_detected(self, tmp_path, monkeypatch):
+        """[Phase 2 #14] When target pane runs an interactive shell (zsh),
+        the existing paste-buffer path is used. The `# orch:` prefix makes
+        the line a shell comment, so the paste is harmless."""
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        monkeypatch.setattr(orch.shutil, "which", lambda cmd: "/usr/bin/tmux")
+        monkeypatch.setattr(orch, "_pane_current_command", lambda pane: "zsh")
+        calls = []
+        monkeypatch.setattr(orch.subprocess, "run", self._fake_run_recorder(calls))
+        monkeypatch.setattr(orch, "_tmux_load_buffer",
+                            lambda buf, data: calls.append(("load-buffer", buf)))
+
+        ok = orch.notify_pane("%128", "# orch:delegate thread=t-002")
+
+        assert any("load-buffer" in str(c) for c in calls)
+        assert any("paste-buffer" in str(c) for c in calls)
+        assert any("send-keys" in str(c) and "Enter" in str(c) for c in calls)
+        assert ok is True
+
+    def test_notify_skips_when_foreground_command_unknown(self, tmp_path, monkeypatch):
+        """[Phase 2 #14] If the target pane is running an unknown / non-shell
+        foreground command (vim, ssh, python REPL, …), paste would be
+        interpreted as input. Skip entirely; alert stays in inbox only."""
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        monkeypatch.setattr(orch.shutil, "which", lambda cmd: "/usr/bin/tmux")
+        monkeypatch.setattr(orch, "_pane_current_command", lambda pane: "vim")
+        calls = []
+        monkeypatch.setattr(orch.subprocess, "run", self._fake_run_recorder(calls))
+        monkeypatch.setattr(orch, "_tmux_load_buffer",
+                            lambda buf, data: calls.append(("load-buffer", buf)))
+
+        ok = orch.notify_pane("%77", "hello")
+
+        assert ok is False
+        assert not any("paste-buffer" in str(c) for c in calls)
+        assert not any("load-buffer" in str(c) for c in calls)
+        assert not any("set-option" in str(c) for c in calls)
+
+    def test_notify_status_mode_truncates_option_value(self, tmp_path, monkeypatch):
+        """[Phase 2 #14] @orch_last_alert is capped at 80 chars so a runaway
+        envelope summary cannot blow up the tmux status format."""
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        monkeypatch.setattr(orch.shutil, "which", lambda cmd: "/usr/bin/tmux")
+        monkeypatch.setattr(orch, "_pane_current_command", lambda pane: "claude")
+        captured = []
+        monkeypatch.setattr(orch.subprocess, "run", self._fake_run_recorder(captured))
+
+        ok = orch.notify_pane("%105", "x" * 200)
+        assert ok is True
+
+        set_opt = [c for c in captured if "set-option" in c and "@orch_last_alert" in c]
+        assert set_opt, f"Expected set-option @orch_last_alert call, got: {captured}"
+        # command form: ("tmux", "set-option", "-t", pane, "@orch_last_alert", value)
+        value = set_opt[0][set_opt[0].index("@orch_last_alert") + 1]
+        assert len(value) <= 80
+
+    def test_notify_mode_env_override_forces_paste(self, tmp_path, monkeypatch):
+        """[Phase 2 #14] CLMUX_ORCH_NOTIFY_MODE=paste forces the paste path
+        even when pane_current_command would route to status/skip. Operator
+        escape hatch for testing or backward-compat workflows."""
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        monkeypatch.setattr(orch.shutil, "which", lambda cmd: "/usr/bin/tmux")
+        monkeypatch.setattr(orch, "_pane_current_command", lambda pane: "claude")
+        monkeypatch.setenv("CLMUX_ORCH_NOTIFY_MODE", "paste")
+        calls = []
+        monkeypatch.setattr(orch.subprocess, "run", self._fake_run_recorder(calls))
+        monkeypatch.setattr(orch, "_tmux_load_buffer",
+                            lambda buf, data: calls.append(("load-buffer", buf)))
+
+        ok = orch.notify_pane("%105", "forced paste")
+        assert ok is True
+        assert any("paste-buffer" in str(c) for c in calls)
+        assert any("load-buffer" in str(c) for c in calls)
+
+    def test_notify_idle_detection_fails_gracefully(self, tmp_path, monkeypatch):
+        """[Phase 2 #14] If `tmux display-message` fails (timeout, non-zero
+        exit, CalledProcessError), _pane_current_command returns "" and
+        notify_pane routes that to skip — no paste, no set-option."""
+        orch = _import_orch(monkeypatch, tmp_path)
+        orch.ensure_layout()
+        monkeypatch.setattr(orch.shutil, "which", lambda cmd: "/usr/bin/tmux")
+
+        def raising_run(args, **kw):
+            if "display-message" in args:
+                raise orch.subprocess.TimeoutExpired(cmd=args, timeout=2)
+            class R:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return R()
+        monkeypatch.setattr(orch.subprocess, "run", raising_run)
+        calls = []
+        monkeypatch.setattr(orch, "_tmux_load_buffer",
+                            lambda buf, data: calls.append(("load-buffer", buf)))
+
+        ok = orch.notify_pane("%88", "hello")
+
+        assert ok is False
+        assert calls == []
 
 
 class TestMeeting:

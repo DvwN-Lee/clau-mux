@@ -225,8 +225,45 @@ If stronger guarantees are needed in Phase 2, options include: (1) signed conten
 - **No cascade cancel.** A rejected parent thread does NOT auto-cancel child threads; Sub should handle that manually if needed.
 - **Master stale detection is manual.** If a Master pane dies without releasing, another pane can't automatically take over. Recovery path: `clmux-orchestrate release-master --pane <dead> --force` (a crash-recovery flag added in Phase 1 v2 for exactly this case).
 - **Meeting lock stuck after crash.** Same failure mode for meetings. Recovery: `clmux-orchestrate meeting release --meeting-id <id> --force`.
-- **Tmux paste-buffer is best-effort.** If tmux is unavailable, `notify_pane` silently returns False; the alert is still recorded in `inbox/<pane>.jsonl` and can be pulled with `clmux-orchestrate inbox --pane <pane>`.
+- **Tmux notify is best-effort.** If tmux is unavailable or the target pane is running an unknown foreground command, `notify_pane` silently returns False; the alert is still recorded in `inbox/<pane>.jsonl` and can be pulled with `clmux-orchestrate inbox --pane <pane>`. See [notify_pane behavior](#notify_pane-behavior) for the decision tree.
 - **Mid-delegate crash — alert paste not retried.** If Master crashes between JSONL durability and tmux paste, the inbox record exists but the Sub pane never flashed. `resume_pane` surfaces the pending alert, but a human must inspect it. Phase 2: auto-replay unpasted alerts on resume.
 - **No schema versioning.** Envelopes don't carry a `schema_version`. Adding new required body fields will break validation of old records on replay. Phase 2: add `version` field and compat shim.
 - **Cross-project / cross-machine** — `~/.claude/orchestration/` is global to one machine and one HOME. No distributed coordination.
 - **Single Master globally.** This is by design (prevents split-brain). If you need two concurrent Masters for two independent workflows, run them under two OS users (two HOMEs) or on two machines.
+
+## notify_pane behavior
+
+`notify_pane(target_pane, message)` delivers a best-effort, idle-aware tmux alert. The inbox record (`inbox/<pane>.jsonl`) is always written by the CLI handler *before* `notify_pane` runs, so every notification is durable regardless of notify outcome.
+
+### Decision tree
+
+1. `CLMUX_ORCH_NO_NOTIFY=1` set → return `False` immediately (test isolation).
+2. `tmux` not on `$PATH` → return `False`.
+3. Resolve mode:
+   - `CLMUX_ORCH_NOTIFY_MODE` set to `paste` | `status` | `skip` → use that verbatim.
+   - `CLMUX_ORCH_NOTIFY_MODE=auto` (default) or unset → query `#{pane_current_command}` on `target_pane` via `tmux display-message`:
+     - `zsh` / `bash` / `fish` / `sh` / `dash` / `ksh` → **paste** (message starts with `# orch:`, a shell comment — harmless at the prompt).
+     - `claude` / `node` → **status** (Claude Code / Node REPL cannot safely receive paste — it would be absorbed as input).
+     - anything else, `display-message` failure, or empty output → **skip** (inbox record only).
+
+### Modes
+
+| Mode | Action |
+|------|--------|
+| `paste` | `tmux load-buffer` + `paste-buffer -p -d` + `send-keys Enter`. Unchanged from v1.3.1. |
+| `status` | `tmux set-option -t <pane> @orch_last_alert "<msg[:80]>"` plus best-effort `display-message` flash. Receivers surface the value via a status-line format, e.g. `set -g status-right "#{@orch_last_alert}"`. |
+| `skip` | No tmux write. Alert remains in inbox. |
+
+### Environment variables
+
+| Variable | Effect |
+|----------|--------|
+| `CLMUX_ORCH_NO_NOTIFY=1` | Short-circuit `notify_pane`. Used by `TestCLI` and any operator who wants silent runs. |
+| `CLMUX_ORCH_NOTIFY_MODE=auto` | Default. Auto-detect per pane. |
+| `CLMUX_ORCH_NOTIFY_MODE=paste` | Always paste, regardless of foreground command. Escape hatch for panes whose foreground command is not auto-classified as a shell. |
+| `CLMUX_ORCH_NOTIFY_MODE=status` | Always set `@orch_last_alert`. Useful when every pane runs Claude Code. |
+| `CLMUX_ORCH_NOTIFY_MODE=skip` | Disable tmux notify; rely solely on inbox. |
+
+### Rationale
+
+Before Phase 2 #14, `notify_pane` pasted unconditionally. Claude Code panes absorbed the paste into their input box, and editors / REPLs received random keystrokes. The `[orch]` → `# orch:` prefix change in v1.3.1 (Issue #25) silenced the zsh glob error but did **not** fix input-box pollution. Idle-aware routing addresses the root cause: paste only when the receiver is a shell prompt, use a side-channel for Claude Code, and stay out of the way otherwise.

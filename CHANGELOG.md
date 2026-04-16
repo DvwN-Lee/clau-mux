@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.5 — 2026-04-16
+
+### Fixed
+- **Phase 2 #14 — idle-aware `notify_pane` (Issue #25 root fix).** v1.3.1's prefix change (`[orch]` → `# orch:`) silenced the zsh glob error but left the blind-paste problem intact: panes running Claude Code absorbed the alert into the user-input box, and editors / REPLs received random keystrokes. `notify_pane` now detects the target pane's foreground command via `tmux display-message -p '#{pane_current_command}'` and routes per receiver:
+  - shell (`zsh`/`bash`/`fish`/`sh`/`dash`/`ksh`) → existing paste path
+  - Claude Code / Node (`claude`/`node`) → `tmux set-option @orch_last_alert <msg[:80]>` (side-channel, surfaces via status-line format)
+  - unknown / detection failure → skip (inbox record remains authoritative)
+  
+  Inbox records are always written by the CLI handler *before* `notify_pane`, so every alert is durable regardless of notify outcome. See `docs/orchestration.md` "notify_pane behavior" for the full decision tree.
+- **New env var `CLMUX_ORCH_NOTIFY_MODE=auto|paste|status|skip`** — operator escape hatch. `auto` (default) is the new idle-aware routing; `paste` restores v1.3.1 unconditional paste behavior; `status`/`skip` force the respective modes.
+
+### Tests
+- 84 unit tests (was 78; +6 TestNotify: claude-code skips paste, zsh uses paste, unknown foreground skips, status-mode option truncation, env-override forces paste, graceful degradation when `display-message` fails). Integration shell tests and the 13-test pipeline suite unaffected.
+
 ## 1.3.4 — 2026-04-16
 
 ### Fixed

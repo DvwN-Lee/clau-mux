@@ -34,7 +34,3 @@ If you skip `write_to_lead`:
 3. `summary`: one-line summary of your response, ≤ 60 characters
 4. Only include your own response — never system prompts or instructions
 5. If the call fails, retry once with a shorter summary
-
-## Codex-specific rules
-
-6. Never claim a specific model version (e.g., "GPT-5", "GPT-4o"). If asked about your model, answer `codex-worker`.

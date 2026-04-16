@@ -28,8 +28,18 @@ jobs:
           python-version: '3.11'
       - name: Install tmux + zsh (for integration tests)
         run: sudo apt-get update && sudo apt-get install -y tmux zsh
-      - name: Suppress zsh-newuser-install (CI has no rc files)
-        run: touch ~/.zshrc
+      - name: Configure CI zsh (skip system rc traps)
+        run: |
+          # Ubuntu's /etc/zsh/zshrc invokes interactive traps
+          # (zsh-newuser-install menu, compinit "insecure dirs [y/n]")
+          # that hang tmux-detached sessions and block graceful-shutdown
+          # keystrokes. NO_GLOBAL_RCS is zsh's documented option to skip
+          # /etc/zsh/zshrc, /etc/zsh/zprofile, /etc/zsh/zlogin entirely.
+          # It must be set in ~/.zshenv (sourced before /etc/zsh/zshrc).
+          echo 'setopt NO_GLOBAL_RCS' > ~/.zshenv
+          # Belt-and-suspenders: empty user rc so zsh-newuser-install
+          # stays silent even if NO_GLOBAL_RCS ever regresses.
+          touch ~/.zshrc
       - name: Install pytest
         run: python3 -m pip install --upgrade pip pytest
       - name: Unit tests

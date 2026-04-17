@@ -181,3 +181,120 @@ clmux-send() {
 
   echo "[clmux-send] pane=$pane (chars=$char_count, flags=$flags_summary)"
 }
+
+# clmux-teammate-check — pre-flight check before SendMessage tool call.
+# Validates that the named teammate's pane is alive AND its bridge process is
+# running. Exits 0 if all checks pass; 1 otherwise. Runs all checks even on
+# failure so the user gets a complete diagnostic.
+#
+# Usage:
+#   clmux-teammate-check --team <team_name> --to <agent_name>
+#
+# Required:
+#   --team <team>   team directory name (under ~/.claude/teams/)
+#   --to <agent>    teammate agent name (e.g. gemini-worker, codex-worker)
+clmux-teammate-check() {
+  local team="" agent=""
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --team) team="$2"; shift 2 ;;
+      --to)   agent="$2"; shift 2 ;;
+      -*) echo "error: unknown arg $1" >&2; return 1 ;;
+      *) echo "error: unexpected $1" >&2; return 1 ;;
+    esac
+  done
+  [[ -z "$team" ]]  && { echo "error: --team required" >&2; return 1; }
+  [[ -z "$agent" ]] && { echo "error: --to required" >&2; return 1; }
+
+  local teams_root="${HOME}/.claude/teams"
+  local team_dir="${teams_root}/${team}"
+  local failed=0
+
+  echo "[teammate-check] team=${team} agent=${agent}"
+
+  # Check 1: team_dir exists
+  if [[ -d "$team_dir" ]]; then
+    echo "[teammate-check] team_dir: OK (${team_dir})"
+  else
+    echo "[teammate-check] team_dir: MISSING (${team_dir})"
+    failed=1
+  fi
+
+  # Check 2: inbox file present
+  local inbox_file="${team_dir}/inboxes/${agent}.json"
+  if [[ -f "$inbox_file" ]]; then
+    echo "[teammate-check] inbox:    OK (${inbox_file})"
+  else
+    echo "[teammate-check] inbox:    MISSING (${inbox_file})"
+    failed=1
+  fi
+
+  # Check 3: pane_file present + references an alive pane
+  local pane_file="${team_dir}/.${agent}-pane"
+  if [[ ! -f "$pane_file" ]]; then
+    echo "[teammate-check] pane:     MISSING (${pane_file})"
+    failed=1
+  else
+    local pane_id
+    pane_id=$(< "$pane_file")
+    pane_id="${pane_id//[[:space:]]/}"
+    if [[ -z "$pane_id" ]]; then
+      echo "[teammate-check] pane:     MISSING (file empty)"
+      failed=1
+    elif tmux list-panes -a -F '#{pane_id}' | grep -qx -- "$pane_id"; then
+      echo "[teammate-check] pane:     OK (${pane_id})"
+    else
+      echo "[teammate-check] pane:     DEAD (${pane_id} not in tmux list-panes)"
+      failed=1
+    fi
+  fi
+
+  # Check 4: bridge pid alive
+  local pid_file="${team_dir}/.${agent}-bridge.pid"
+  if [[ ! -f "$pid_file" ]]; then
+    echo "[teammate-check] bridge:   MISSING (${pid_file})"
+    failed=1
+  else
+    local bridge_pid
+    bridge_pid=$(< "$pid_file")
+    bridge_pid="${bridge_pid//[[:space:]]/}"
+    if [[ -z "$bridge_pid" ]]; then
+      echo "[teammate-check] bridge:   MISSING (file empty)"
+      failed=1
+    elif kill -0 "$bridge_pid" 2>/dev/null; then
+      echo "[teammate-check] bridge:   OK (pid=${bridge_pid})"
+    else
+      echo "[teammate-check] bridge:   DEAD (pid=${bridge_pid} not signalable)"
+      failed=1
+    fi
+  fi
+
+  # Check 5: pane has @clmux-agent option matching agent
+  local pane_file2="${team_dir}/.${agent}-pane"
+  if [[ -f "$pane_file2" ]]; then
+    local pane_id2
+    pane_id2=$(< "$pane_file2")
+    pane_id2="${pane_id2//[[:space:]]/}"
+    if [[ -n "$pane_id2" ]]; then
+      local pane_tag
+      pane_tag=$(tmux show-options -p -t "$pane_id2" -v @clmux-agent 2>/dev/null)
+      if [[ "$pane_tag" == "$agent" ]]; then
+        echo "[teammate-check] pane_tag: OK (@clmux-agent=${pane_tag})"
+      elif [[ -n "$pane_tag" ]]; then
+        echo "[teammate-check] pane_tag: MISMATCH (=${pane_tag})"
+        failed=1
+      else
+        echo "[teammate-check] pane_tag: MISSING (@clmux-agent not set on ${pane_id2})"
+        failed=1
+      fi
+    fi
+  fi
+
+  if (( failed )); then
+    echo "[teammate-check] status:   DEAD"
+    return 1
+  else
+    echo "[teammate-check] status:   ALIVE"
+    return 0
+  fi
+}

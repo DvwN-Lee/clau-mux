@@ -400,6 +400,7 @@ clmux-mid csv-importer --scope "CSV 임포트 엔드포인트 추가"
 - `clmux-bridge.zsh`는 큰 메시지(>300자)를 300자 단위 청크로 분할하여 paste-buffer로 전달합니다. macOS PTY 버퍼 한계(~1024 bytes)로 인해 단일 paste 이벤트는 잘릴 수 있으며, 청크 분할 방식으로 이를 우회합니다.
 - **함수 업데이트 시 shell 재-source 필요**: `clmux.zsh` (및 `lib/*.zsh`)를 pull/수정한 후, 이미 열려있던 tmux pane의 zsh 세션은 이전 함수 정의를 캐시한 상태를 유지합니다. Claude Code Bash tool 역시 장기 지속 shell을 재사용하므로 새 정의를 보지 못합니다. 처치: 영향받은 pane에서 `exec zsh` 실행(해당 shell 재기동) 또는 새 tmux session 시작.
 - **Chain helper 와 `clmux-bridge.zsh` 이름 구분**: `clmux-bridge.zsh`는 teammate pane 내부에서 실행되는 **릴레이 스크립트**(MCP ↔ CLI). `lib/teammate-{internals,wrappers}.zsh`는 그 릴레이를 띄우는 **zsh 래퍼**. 개념적으로 같은 "bridge teammate" 서브시스템이지만 실행 계층이 다름 — docs/커밋 메시지에서 혼동 주의.
+- **`clmux-orchestrate inbox` vs `thread` kind 필터**: `inbox`는 **행동을 요구하는** envelope만 표면화 — `delegate`, `report`, `blocked`, `reply` 4종. 정보성 `progress`, `ack`, `accept`, `reject`, `close`는 inbox에 **나타나지 않고** thread history에만 기록됨. Mid/Master가 Leaf의 heartbeat(progress) 혹은 ack·close 상태 전이를 감지하려면 `clmux-orchestrate thread --id <tid>`로 직접 조회 필요. `inbox`만 polling하면 Leaf가 침묵하는 것처럼 보일 수 있음.
 
 ## 세부 문서
 

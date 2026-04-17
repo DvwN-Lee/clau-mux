@@ -106,9 +106,17 @@ clmux-master() {
     if [[ "${CLMUX_ITERM_AUTO:-1}" != "0" ]] \
        && [[ "$(uname)" == "Darwin" ]] \
        && command -v osascript >/dev/null 2>&1; then
+      # 2-step: create window (runs profile's default shell), then write
+      # `tmux attach` as text into it. This way the window's primary process
+      # is the shell, not `tmux attach` — so when tmux detaches or exits,
+      # the underlying shell keeps the window alive (immune to iTerm
+      # "Close window when command exits" profile setting).
       _iterm_win_id=$(osascript \
         -e 'tell application "iTerm"' \
-        -e "set newWin to (create window with default profile command \"tmux attach -t $session\")" \
+        -e 'set newWin to (create window with default profile)' \
+        -e 'tell current session of newWin' \
+        -e "write text \"tmux attach -t $session\"" \
+        -e 'end tell' \
         -e 'return id of newWin as text' \
         -e 'end tell' 2>/dev/null)
     fi
@@ -241,10 +249,15 @@ clmux-mid() {
      && [[ "${CLMUX_ITERM_AUTO:-1}" != "0" ]] \
      && [[ "$(uname)" == "Darwin" ]] \
      && command -v osascript >/dev/null 2>&1; then
+    # 2-step tab: create tab (runs profile shell), then write tmux attach
+    # as text. Keeps the tab alive when tmux detaches/exits.
     if osascript \
          -e 'tell application "iTerm"' \
          -e "tell window id $_my_win_id" \
-         -e "create tab with default profile command \"tmux attach -t $session\"" \
+         -e 'set newTab to (create tab with default profile)' \
+         -e 'tell current session of newTab' \
+         -e "write text \"tmux attach -t $session\"" \
+         -e 'end tell' \
          -e 'end tell' \
          -e 'end tell' >/dev/null 2>&1; then
       _tab_ok=1
@@ -257,9 +270,13 @@ clmux-mid() {
     if [[ "${CLMUX_ITERM_AUTO:-1}" != "0" ]] \
        && [[ "$(uname)" == "Darwin" ]] \
        && command -v osascript >/dev/null 2>&1; then
+      # 2-step window: same pattern as Master, keeps window alive after tmux exit.
       _leaf_win_id=$(osascript \
         -e 'tell application "iTerm"' \
-        -e "set newWin to (create window with default profile command \"tmux attach -t $session\")" \
+        -e 'set newWin to (create window with default profile)' \
+        -e 'tell current session of newWin' \
+        -e "write text \"tmux attach -t $session\"" \
+        -e 'end tell' \
         -e 'return id of newWin as text' \
         -e 'end tell' 2>/dev/null)
     fi

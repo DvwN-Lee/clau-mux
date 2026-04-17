@@ -4,6 +4,33 @@
 # that skill bodies previously inlined. Self-init on bare call; spawn child
 # with positional arg (Master → Mid, Mid → Leaf). Leaves do not fan out.
 
+# _clmux_safe_set_master — claim orchestrate master role for $TMUX_PANE.
+# If a stale lock is detected (held by a pane no longer alive in tmux),
+# force-release and retry. If held by an alive pane, warn and do not steal.
+# Returns 0 always (lock claim is best-effort, matching prior `|| true`).
+_clmux_safe_set_master() {
+  local label="$1"
+  local out
+  if out=$(clmux-orchestrate set-master --pane "$TMUX_PANE" --label "$label" 2>&1); then
+    return 0
+  fi
+  local held_by
+  held_by=$(echo "$out" | grep -oE 'master role held by %[0-9]+' | awk '{print $NF}')
+  if [[ -z "$held_by" ]]; then
+    echo "warn: set-master failed: $out" >&2
+    return 0
+  fi
+  if tmux list-panes -a -F '#{pane_id}' | grep -qx -- "$held_by"; then
+    echo "warn: master lock held by $held_by (alive); not auto-releasing. Transfer: clmux-orchestrate release-master --pane $held_by --force" >&2
+    return 0
+  fi
+  echo "[master] stale lock detected (holder=$held_by not alive); auto-releasing" >&2
+  clmux-orchestrate release-master --pane "$held_by" --force >/dev/null 2>&1
+  clmux-orchestrate set-master --pane "$TMUX_PANE" --label "$label" >/dev/null 2>&1 \
+    || echo "warn: set-master still failed after release; continuing" >&2
+  return 0
+}
+
 clmux-master() {
   local project="" force=0
   while [[ $# -gt 0 ]]; do
@@ -31,7 +58,7 @@ clmux-master() {
       fi
     fi
     clmux-chain-register --role master --pane "$TMUX_PANE"
-    clmux-orchestrate set-master --pane "$TMUX_PANE" --label "master-$(basename "$PWD")" || true
+    _clmux_safe_set_master "master-$(basename "$PWD")"
     echo "[master] pane=$TMUX_PANE cwd=$PWD ready"
   else
     # With <project>: self-init + spawn Mid.
@@ -119,7 +146,7 @@ clmux-mid() {
   [[ -n "$peer_up" ]] && mode=A || mode=B
 
   clmux-chain-register --role mid --pane "$TMUX_PANE"
-  clmux-orchestrate set-master --pane "$TMUX_PANE" --label "mid-$(basename "$(git rev-parse --show-toplevel)")" || true
+  _clmux_safe_set_master "mid-$(basename "$(git rev-parse --show-toplevel)")"
   echo "[mid] pane=$TMUX_PANE mode=$mode project=$(git rev-parse --show-toplevel)"
 
   [[ -z "$leaf_name" ]] && return 0

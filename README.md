@@ -401,6 +401,18 @@ clmux-mid csv-importer --scope "CSV 임포트 엔드포인트 추가"
 - **함수 업데이트 시 shell 재-source 필요**: `clmux.zsh` (및 `lib/*.zsh`)를 pull/수정한 후, 이미 열려있던 tmux pane의 zsh 세션은 이전 함수 정의를 캐시한 상태를 유지합니다. Claude Code Bash tool 역시 장기 지속 shell을 재사용하므로 새 정의를 보지 못합니다. 처치: 영향받은 pane에서 `exec zsh` 실행(해당 shell 재기동) 또는 새 tmux session 시작.
 - **Chain helper 와 `clmux-bridge.zsh` 이름 구분**: `clmux-bridge.zsh`는 teammate pane 내부에서 실행되는 **릴레이 스크립트**(MCP ↔ CLI). `lib/teammate-{internals,wrappers}.zsh`는 그 릴레이를 띄우는 **zsh 래퍼**. 개념적으로 같은 "bridge teammate" 서브시스템이지만 실행 계층이 다름 — docs/커밋 메시지에서 혼동 주의.
 - **`clmux-orchestrate inbox` vs `thread` kind 필터**: `inbox`는 **행동을 요구하는** envelope만 표면화 — `delegate`, `report`, `blocked`, `reply` 4종. 정보성 `progress`, `ack`, `accept`, `reject`, `close`는 inbox에 **나타나지 않고** thread history에만 기록됨. Mid/Master가 Leaf의 heartbeat(progress) 혹은 ack·close 상태 전이를 감지하려면 `clmux-orchestrate thread --id <tid>`로 직접 조회 필요. `inbox`만 polling하면 Leaf가 침묵하는 것처럼 보일 수 있음.
+- **Chain helper 명령어 동사 규약**: `status`/`check`/`map`/`snapshot`
+  동사는 **읽기 전용** (pane/orchestrate 상태 조회, 변경 없음).
+  `register`/`unregister`/`delegate`/`report`/`accept`/`reject`/`close`/
+  `notify` 동사는 **쓰기** (chain/orchestrate/inbox 상태 변경). Skill
+  body에서 호출 빈도가 높은 순간 이 동사 prefix로 read vs mutate를
+  즉시 구분할 수 있다.
+- **tmux show-options `@clmux-chain-peer-down` exit 1 정상**: Mid가
+  아직 leaf를 spawn하지 않았으면 `@clmux-chain-peer-down` 옵션이
+  존재하지 않아 `tmux show-options -v @clmux-chain-peer-down`이
+  `invalid option` + exit 1을 낸다. 오류가 아니라 "peer 없음" 상태.
+  스크립트에서 취급 시 `-q` 또는 `2>/dev/null` 사용, 또는
+  `clmux-chain-snapshot` (예정)로 normalize된 결과 받을 것.
 
 ## 세부 문서
 

@@ -300,7 +300,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--from", dest="from_pane", required=True)
     sp.add_argument("--to", dest="to_pane", required=True)
     sp.add_argument("--scope", required=True)
-    sp.add_argument("--criteria", required=True)
+    sp.add_argument("--criteria", default="",
+                    help="optional success criteria; empty string is valid")
     sp.add_argument("--non-goals", dest="non_goals")
     sp.add_argument("--deliverable")
     sp.add_argument("--urgency", choices=["blocker", "high", "normal", "low"])

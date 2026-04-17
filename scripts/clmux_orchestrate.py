@@ -268,6 +268,25 @@ def cmd_resume(args):
     _emit(_orch.resume_pane(args.pane), args.json)
 
 
+def cmd_threads(args):
+    _emit(_orch.list_threads(
+        pane_id=args.pane,
+        role=args.role,
+        state=args.state,
+    ), args.json)
+
+
+def cmd_notify(args):
+    eid = _orch.post_notify(
+        from_pane=args.from_pane,
+        to_pane=args.to_pane,
+        kind=args.kind,
+        summary=args.summary,
+        body=args.body or "",
+    )
+    _emit({"envelope_id": eid, "kind": "notify"}, args.json)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="clmux-orchestrate",
                                 description="Pane orchestration protocol CLI")
@@ -367,6 +386,21 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("thread", parents=[common]); sp.add_argument("--id", required=True); sp.set_defaults(func=cmd_thread)
     sp = sub.add_parser("panes", parents=[common]); sp.set_defaults(func=cmd_panes)
     sp = sub.add_parser("resume", parents=[common]); sp.add_argument("--pane", required=True); sp.set_defaults(func=cmd_resume)
+
+    # AX extensions
+    sp = sub.add_parser("threads", parents=[common])
+    sp.add_argument("--pane")
+    sp.add_argument("--role", choices=["target", "delegator", "any"], default="any")
+    sp.add_argument("--state", choices=["open", "closed", "any"], default="any")
+    sp.set_defaults(func=cmd_threads)
+
+    sp = sub.add_parser("notify", parents=[common])
+    sp.add_argument("--from", dest="from_pane", required=True)
+    sp.add_argument("--to", dest="to_pane", required=True)
+    sp.add_argument("--kind", required=True)
+    sp.add_argument("--summary", required=True)
+    sp.add_argument("--body")
+    sp.set_defaults(func=cmd_notify)
 
     return p
 

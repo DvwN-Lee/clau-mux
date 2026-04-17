@@ -4,6 +4,38 @@
 # `clmux-mid-stop` / `clmux-master-stop` handle tmux session + chain option
 # cleanup without cascading (explicit opt-in via --cascade).
 
+# _clmux_prune_peer_down — trim dead pane ids from a pane's @clmux-chain-peer-down
+# CSV. Used when a child was already killed before the stop wrapper ran, so
+# clmux-chain-unregister's --peer-of path had no concrete dead-pane id to
+# remove. Walks the upstream pane's current CSV and drops any entry not in
+# `tmux list-panes -a`. If the resulting list is empty, unsets the option.
+_clmux_prune_peer_down() {
+  local upstream="$1"
+  [[ -z "$upstream" ]] && return 0
+  tmux list-panes -a -F '#{pane_id}' | grep -qx -- "$upstream" || return 0
+  local cur
+  cur=$(tmux show-options -p -t "$upstream" -v @clmux-chain-peer-down 2>/dev/null)
+  [[ -z "$cur" ]] && return 0
+  local alive_panes live
+  alive_panes=$(tmux list-panes -a -F '#{pane_id}')
+  local arr kept=()
+  arr=(${(s:,:)cur})
+  local p
+  for p in $arr; do
+    grep -qx -- "$p" <<< "$alive_panes" && kept+=("$p")
+  done
+  local new=${(j:,:)kept}
+  if [[ "$new" == "$cur" ]]; then
+    return 0
+  fi
+  if [[ -z "$new" ]]; then
+    tmux set-option -pu -t "$upstream" @clmux-chain-peer-down 2>/dev/null
+  else
+    tmux set-option -p -t "$upstream" @clmux-chain-peer-down "$new"
+  fi
+  echo "[chain-prune] $upstream peer-down: '$cur' -> '${new:-<empty>}'"
+}
+
 clmux-chain-unregister() {
   local pane="${TMUX_PANE}"
   local upstream=""
@@ -109,7 +141,10 @@ clmux-leaf-stop() {
   if [[ -n "$leaf_pane" ]]; then
     clmux-chain-unregister --pane "$leaf_pane" --peer-of "$TMUX_PANE"
   else
-    echo "warn: leaf session already gone; skipping chain-unregister" >&2
+    # Leaf pane already gone — we can't unregister its (nonexistent) options,
+    # but we still need to prune Mid's peer-down CSV of dead entries so the
+    # chain doesn't accumulate stale pane ids across iterations.
+    _clmux_prune_peer_down "$TMUX_PANE"
   fi
 
   # Step 2: kill leaf tmux session

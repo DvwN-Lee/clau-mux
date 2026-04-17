@@ -288,6 +288,14 @@ clmux-mid <leaf-name> --scope "..."   # + git worktree + Leaf pane 스폰 + dele
 clmux-leaf                            # worktree pane self-init (peer-up 필수)
 ```
 
+**iTerm2 자동 창/탭 통합 (macOS):**
+
+`clmux-master <project>` 실행 시 Mid 의 tmux 세션에 **attach 된 새 iTerm 창**이 자동으로 열립니다. 이어서 그 Mid pane 에서 `clmux-mid <leaf>` 를 실행하면 Leaf 세션이 **같은 iTerm 창의 새 탭**으로 붙습니다 (Mid pane 옵션 `@clmux-iterm-window-id` 에 저장된 창 ID 기준).
+
+- Mode B (Master 없이 바로 Mid 에서 시작) 또는 Mid pane 에 창 ID 가 없는 경우 Leaf 는 별도 iTerm 창으로 열립니다.
+- 비활성화: `export CLMUX_ITERM_AUTO=0` — 이 경우 tmux 세션만 detached 상태로 생성되고 iTerm 은 열리지 않습니다 (이전 동작).
+- 비-macOS / iTerm 미설치 / `osascript` 없음 환경은 자동 no-op 후 `tmux attach -t <session>` hint 출력.
+
 **청소 (역할별 teardown):**
 
 ```bash
@@ -366,6 +374,7 @@ clmux-mid csv-importer --scope "CSV 임포트 엔드포인트 추가"
 | `clmux-chain-check [<pane>]` | peer alive 검증 |
 | `clmux-chain-map` | 전체 체인 상태 JSON 스냅샷 |
 | `clmux-chain-unregister [--pane <id>] [--peer-of <upstream>]` | 수동 해제 + upstream peer-down CSV trim |
+| `CLMUX_ITERM_AUTO=0` (env) | `clmux-master <proj>` / `clmux-mid <leaf>` 시 iTerm 자동 창·탭 생성 비활성화 (기본 1, macOS+iTerm 전용) |
 
 ## 요구사항
 

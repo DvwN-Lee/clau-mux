@@ -4,44 +4,6 @@
 # that skill bodies previously inlined. Self-init on bare call; spawn child
 # with positional arg (Master → Mid, Mid → Leaf). Leaves do not fan out.
 
-# _clmux_iterm_open_window — open a new iTerm window running `tmux attach -t <session>`.
-# Echoes the iTerm window id on success; empty (non-zero exit not guaranteed) otherwise.
-# Skipped on non-macOS, missing osascript, CLMUX_ITERM_AUTO=0, or iTerm not installed.
-# Caller should tolerate empty return (fallback to tmux attach hint).
-_clmux_iterm_open_window() {
-  local session="$1"
-  [[ "${CLMUX_ITERM_AUTO:-1}" == "0" ]] && return 0
-  [[ "$(uname)" != "Darwin" ]] && return 0
-  command -v osascript >/dev/null 2>&1 || return 0
-
-  local win_id
-  win_id=$(osascript \
-    -e 'tell application "iTerm"' \
-    -e "set newWin to (create window with default profile command \"tmux attach -t $session\")" \
-    -e 'return id of newWin as text' \
-    -e 'end tell' 2>/dev/null)
-
-  [[ -n "$win_id" ]] && echo "$win_id"
-}
-
-# _clmux_iterm_open_tab_in — create a new tab in the iTerm window with given id,
-# running `tmux attach -t <session>`. Returns non-zero on failure so caller can
-# fall back to _clmux_iterm_open_window.
-_clmux_iterm_open_tab_in() {
-  local win_id="$1" session="$2"
-  [[ "${CLMUX_ITERM_AUTO:-1}" == "0" ]] && return 1
-  [[ "$(uname)" != "Darwin" ]] && return 1
-  command -v osascript >/dev/null 2>&1 || return 1
-  [[ -z "$win_id" ]] && return 1
-
-  osascript \
-    -e 'tell application "iTerm"' \
-    -e "tell window id $win_id" \
-    -e "create tab with default profile command \"tmux attach -t $session\"" \
-    -e 'end tell' \
-    -e 'end tell' >/dev/null 2>&1
-}
-
 clmux-master() {
   local project="" force=0
   while [[ $# -gt 0 ]]; do
@@ -131,10 +93,20 @@ clmux-master() {
 
     echo "[master] mid spawned: pane=$mid_pane session=$session project=$proj_path"
 
-    # Auto-open iTerm window attached to the Mid session; save window id on
-    # the Mid pane so a later clmux-mid call can open its Leaf as a new tab.
-    local _iterm_win_id
-    _iterm_win_id=$(_clmux_iterm_open_window "$session")
+    # Inline: auto-open iTerm window attached to the Mid session; save the
+    # returned iTerm window id on the Mid pane so a later clmux-mid call can
+    # open its Leaf as a new tab. Self-contained (no cross-function dependency)
+    # to survive shell-caching edge cases in Claude Code's Bash tool.
+    local _iterm_win_id=""
+    if [[ "${CLMUX_ITERM_AUTO:-1}" != "0" ]] \
+       && [[ "$(uname)" == "Darwin" ]] \
+       && command -v osascript >/dev/null 2>&1; then
+      _iterm_win_id=$(osascript \
+        -e 'tell application "iTerm"' \
+        -e "set newWin to (create window with default profile command \"tmux attach -t $session\")" \
+        -e 'return id of newWin as text' \
+        -e 'end tell' 2>/dev/null)
+    fi
     if [[ -n "$_iterm_win_id" ]]; then
       tmux set-option -p -t "$mid_pane" @clmux-iterm-window-id "$_iterm_win_id"
       echo "[master] iTerm window opened: id=$_iterm_win_id"
@@ -248,16 +220,39 @@ clmux-mid() {
 
   echo "[mid] leaf spawned: pane=$leaf_pane session=$session branch=$leaf_name worktree=$wt_path"
 
-  # Auto-open iTerm presence for the Leaf:
+  # Inline iTerm presence for the Leaf:
   #   - If this Mid pane has @clmux-iterm-window-id, open a NEW TAB in that window.
-  #   - Otherwise, open a NEW WINDOW (Mode B case, or Master didn't set a window id).
-  local _my_win_id
+  #   - Otherwise (or if tab open fails), open a NEW WINDOW.
+  # Self-contained (no cross-function dependency) to survive shell-caching
+  # edge cases in Claude Code's Bash tool — same approach as BUG-4 fix.
+  local _my_win_id _tab_ok=0
   _my_win_id=$(tmux show-options -p -v @clmux-iterm-window-id 2>/dev/null)
-  if [[ -n "$_my_win_id" ]] && _clmux_iterm_open_tab_in "$_my_win_id" "$session"; then
+  if [[ -n "$_my_win_id" ]] \
+     && [[ "${CLMUX_ITERM_AUTO:-1}" != "0" ]] \
+     && [[ "$(uname)" == "Darwin" ]] \
+     && command -v osascript >/dev/null 2>&1; then
+    if osascript \
+         -e 'tell application "iTerm"' \
+         -e "tell window id $_my_win_id" \
+         -e "create tab with default profile command \"tmux attach -t $session\"" \
+         -e 'end tell' \
+         -e 'end tell' >/dev/null 2>&1; then
+      _tab_ok=1
+    fi
+  fi
+  if (( _tab_ok )); then
     echo "[mid] iTerm tab opened in window id=$_my_win_id"
   else
-    local _leaf_win_id
-    _leaf_win_id=$(_clmux_iterm_open_window "$session")
+    local _leaf_win_id=""
+    if [[ "${CLMUX_ITERM_AUTO:-1}" != "0" ]] \
+       && [[ "$(uname)" == "Darwin" ]] \
+       && command -v osascript >/dev/null 2>&1; then
+      _leaf_win_id=$(osascript \
+        -e 'tell application "iTerm"' \
+        -e "set newWin to (create window with default profile command \"tmux attach -t $session\")" \
+        -e 'return id of newWin as text' \
+        -e 'end tell' 2>/dev/null)
+    fi
     if [[ -n "$_leaf_win_id" ]]; then
       tmux set-option -p -t "$leaf_pane" @clmux-iterm-window-id "$_leaf_win_id"
       echo "[mid] iTerm window opened: id=$_leaf_win_id"

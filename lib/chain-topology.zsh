@@ -46,8 +46,24 @@ clmux-chain-register() {
 # clmux-chain-check — alive check of the chain for a given pane.
 # Returns 0 if all declared peers are alive; prints missing peers to stderr
 # and returns 1 otherwise. Skill handlers call this before every send.
+#
+# Usage:
+#   clmux-chain-check [<pane>] [--verbose]
+#   clmux-chain-check [--verbose] [<pane>]
+#
+# --verbose appends a diagnostic block (helper availability, env) without
+# affecting the exit status.
 clmux-chain-check() {
-  local pane="${1:-$TMUX_PANE}"
+  local verbose=0 pane=""
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --verbose) verbose=1; shift ;;
+      -*) echo "error: unknown arg $1" >&2; return 1 ;;
+      *)  [[ -z "$pane" ]] && pane="$1" || { echo "error: unexpected $1" >&2; return 1; }; shift ;;
+    esac
+  done
+  pane="${pane:-$TMUX_PANE}"
+
   local peer_up peer_down
   peer_up=$(tmux show-options -p -t "$pane" -v @clmux-chain-peer-up 2>/dev/null)
   peer_down=$(tmux show-options -p -t "$pane" -v @clmux-chain-peer-down 2>/dev/null)
@@ -62,9 +78,67 @@ clmux-chain-check() {
   fi
   if (( ${#missing[@]} > 0 )); then
     echo "[chain] BROKEN at $pane: ${missing[*]}" >&2
+    if (( verbose )); then
+      echo "[diag] CLMUX_DIR=${CLMUX_DIR:-<unset>}"
+      echo "[diag] tmux=$(tmux -V 2>/dev/null | head -1)"
+      echo "[diag] claude=$(command -v claude >/dev/null 2>&1 && claude --version 2>/dev/null | head -1 || echo '<not found>')"
+      echo "[diag] zsh=${ZSH_VERSION:-<unknown>}"
+      echo "[diag] helper availability:"
+      local _expected=(
+        clmux clmux-ls clmux-cleanup clmux-orchestrate clmux-pipeline
+        clmux-chain-register clmux-chain-check clmux-chain-map clmux-chain-unregister
+        clmux-master clmux-mid clmux-leaf
+        clmux-master-stop clmux-mid-stop clmux-leaf-stop
+        clmux-gemini clmux-gemini-stop clmux-codex clmux-codex-stop
+        clmux-copilot clmux-copilot-stop
+        clmux-send clmux-teammate-check
+      )
+      local _missing_count=0
+      local _fn
+      for _fn in $_expected; do
+        if typeset -f "$_fn" >/dev/null 2>&1; then
+          printf '  + %s\n' "$_fn"
+        else
+          printf '  - %s   <MISSING>\n' "$_fn"
+          _missing_count=$(( _missing_count + 1 ))
+        fi
+      done
+      if (( _missing_count > 0 )); then
+        echo "[diag] $_missing_count helper(s) missing. Remediation: exec zsh (reloads .zshrc → clmux.zsh dispatcher → lib/*.zsh)"
+      fi
+    fi
     return 1
   fi
   echo "[chain] OK pane=$pane peer-up=${peer_up:-none} peer-down=${peer_down:-none}"
+  if (( verbose )); then
+    echo "[diag] CLMUX_DIR=${CLMUX_DIR:-<unset>}"
+    echo "[diag] tmux=$(tmux -V 2>/dev/null | head -1)"
+    echo "[diag] claude=$(command -v claude >/dev/null 2>&1 && claude --version 2>/dev/null | head -1 || echo '<not found>')"
+    echo "[diag] zsh=${ZSH_VERSION:-<unknown>}"
+    echo "[diag] helper availability:"
+    local _expected=(
+      clmux clmux-ls clmux-cleanup clmux-orchestrate clmux-pipeline
+      clmux-chain-register clmux-chain-check clmux-chain-map clmux-chain-unregister
+      clmux-master clmux-mid clmux-leaf
+      clmux-master-stop clmux-mid-stop clmux-leaf-stop
+      clmux-gemini clmux-gemini-stop clmux-codex clmux-codex-stop
+      clmux-copilot clmux-copilot-stop
+      clmux-send clmux-teammate-check
+    )
+    local _missing_count=0
+    local _fn
+    for _fn in $_expected; do
+      if typeset -f "$_fn" >/dev/null 2>&1; then
+        printf '  + %s\n' "$_fn"
+      else
+        printf '  - %s   <MISSING>\n' "$_fn"
+        _missing_count=$(( _missing_count + 1 ))
+      fi
+    done
+    if (( _missing_count > 0 )); then
+      echo "[diag] $_missing_count helper(s) missing. Remediation: exec zsh (reloads .zshrc → clmux.zsh dispatcher → lib/*.zsh)"
+    fi
+  fi
 }
 
 # clmux-chain-map — JSON snapshot of all chain-registered panes. Master uses

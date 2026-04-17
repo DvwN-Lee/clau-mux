@@ -41,9 +41,14 @@ clmux-master() {
         :
       else
         local _held_by
-        _held_by=$(echo "$_out" | grep -oE 'master role held by %[0-9]+' | awk '{print $NF}')
+        _held_by=$(echo "$_out" | grep -oE 'MasterLockError: master role held by [^[:space:]]+' | awk '{print $NF}')
         if [[ -z "$_held_by" ]]; then
           echo "warn: set-master failed: $_out" >&2
+        elif [[ "$_held_by" == "<stale>" ]] || [[ "$_held_by" == "<unknown>" ]]; then
+          echo "[master] corrupted lock detected (holder=$_held_by); auto-releasing" >&2
+          clmux-orchestrate release-master --pane "$TMUX_PANE" --force >/dev/null 2>&1
+          clmux-orchestrate set-master --pane "$TMUX_PANE" --label "$_label" >/dev/null 2>&1 \
+            || echo "warn: set-master still failed after release; continuing" >&2
         elif tmux list-panes -a -F '#{pane_id}' | grep -qx -- "$_held_by"; then
           echo "warn: master lock held by $_held_by (alive); not auto-releasing. Transfer: clmux-orchestrate release-master --pane $_held_by --force" >&2
         else
@@ -170,9 +175,14 @@ clmux-mid() {
       :
     else
       local _held_by
-      _held_by=$(echo "$_out" | grep -oE 'master role held by %[0-9]+' | awk '{print $NF}')
+      _held_by=$(echo "$_out" | grep -oE 'MasterLockError: master role held by [^[:space:]]+' | awk '{print $NF}')
       if [[ -z "$_held_by" ]]; then
         echo "warn: set-master failed: $_out" >&2
+      elif [[ "$_held_by" == "<stale>" ]] || [[ "$_held_by" == "<unknown>" ]]; then
+        echo "[mid] corrupted lock detected (holder=$_held_by); auto-releasing" >&2
+        clmux-orchestrate release-master --pane "$TMUX_PANE" --force >/dev/null 2>&1
+        clmux-orchestrate set-master --pane "$TMUX_PANE" --label "$_label" >/dev/null 2>&1 \
+          || echo "warn: set-master still failed after release; continuing" >&2
       elif tmux list-panes -a -F '#{pane_id}' | grep -qx -- "$_held_by"; then
         echo "warn: master lock held by $_held_by (alive); not auto-releasing. Transfer: clmux-orchestrate release-master --pane $_held_by --force" >&2
       else

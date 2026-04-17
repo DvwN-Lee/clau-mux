@@ -55,6 +55,7 @@ flowchart LR
 - **tmux 테마**: 커스텀 상태바, 마우스 토글, copy mode
 - **플러그인 자동 로드**: `CLMUX_PLUGIN_DIR` 환경변수 설정 시, 해당 디렉토리의 유효한 플러그인을 자동으로 `--plugin-dir` 인자로 전달
 - **Pane Orchestration** (Phase 1) — hierarchical Master/Sub delegation protocol with thread-level audit, meeting archive, and resume. See [`docs/orchestration.md`](docs/orchestration.md).
+- **Chain Role Helpers** — `clmux-master` / `clmux-mid` / `clmux-leaf` (+ matching `-stop` wrappers). 한 줄 커맨드로 Master→Mid→Leaf 3-계층 체인을 스폰하고, Mid 단계에서는 git worktree 기반 Leaf fanout 자동 처리. 소스 파일은 `lib/*.zsh` 에 책임별 분리 (core / launcher / teammate-* / session-utils / tools / chain-topology / chain-spawn / chain-stop).
 
 ## 설치
 
@@ -265,6 +266,76 @@ SendMessage(to: "copilot-worker", message: "...")
 
 ```
 
+### Chain Role Helpers (Master / Mid / Leaf)
+
+`clmux-bridge` 기반 teammate와는 별도로, **프로젝트 작업을 3-계층 체인(Master → Mid → Leaf)** 으로 분할해 수행하는 일회성 헬퍼 계열. teammate가 "외부 AI CLI를 팀에 붙이는 수평 확장"이라면, Chain Role은 "하나의 프로젝트 작업을 위임 트리로 쪼개는 수직 위임".
+
+**역할 구분:**
+- **Master** (상위 조정) — `~/Desktop` 같은 프로젝트들의 부모 디렉토리. 사용자의 의도를 받아 Mid에게 scope 위임.
+- **Mid** (프로젝트 수준 조정) — 프로젝트 루트(`~/Desktop/<proj>/`). scope를 서브태스크로 쪼개 Leaf에게 fanout. git worktree + tmux session + `clmux-orchestrate delegate` 자동 처리.
+- **Leaf** (실구현) — `.worktrees/<leaf-name>/` 내부에서 실제 코드 편집 + commit + report.
+
+**스폰 (bare form = 현재 pane을 해당 역할로 self-init):**
+
+```bash
+clmux-master                          # 현재 pane을 Master로 self-init
+clmux-master <project>                # + Mid pane 스폰 (<project>-mid 세션)
+
+clmux-mid                             # 현재 pane을 Mid로 self-init
+clmux-mid <leaf-name> --scope "..."   # + git worktree + Leaf pane 스폰 + delegate thread
+    [--criteria "..."]                #   (--criteria 는 optional)
+
+clmux-leaf                            # worktree pane self-init (peer-up 필수)
+```
+
+**청소 (역할별 teardown):**
+
+```bash
+clmux-leaf-stop <leaf-name>                        # Mid pane 에서 실행
+    [--force]          # 브랜치 unmerged여도 강제 제거
+    [--keep-branch]    # 브랜치는 보존 (PR 예정인 경우)
+    [--keep-worktree]  # worktree 디렉토리는 보존
+
+clmux-mid-stop                                     # Mid self-cleanup (peer-up 으로 notify 후 self-kill)
+clmux-mid-stop <project> [--cascade]               # Master 에서 실행 — 지정 Mid 및 활성 Leaves 정리
+clmux-master-stop [--force]                        # Master self-cleanup (Mids 남아있으면 --force 필요)
+```
+
+**체인 상태 조회 / 저수준 조작:**
+
+```bash
+clmux-chain-register --role <r> --pane <id> ...    # 수동 역할 등록 (self-init 함수가 내부에서 사용)
+clmux-chain-check [<pane>]                         # peer alive 검증 (send 전 권장)
+clmux-chain-map                                    # 전체 체인 JSON 스냅샷
+clmux-chain-unregister --pane <id> [--peer-of <upstream>]  # 수동 해제
+```
+
+#### Chain 워크플로우 예시
+
+```bash
+# === Mode A: Master → Mid → Leaf (3-홉) ===
+# ~/Desktop 에서 Master 시작 후 프로젝트 지정
+cd ~/Desktop
+clmux-master                    # 현재 pane 을 Master 로
+clmux-master mywebapp           # mywebapp-mid 세션 스폰
+
+# Mid pane(mywebapp-mid 세션)에서 Leaf fanout
+clmux-mid rate-limit \
+  --scope "POST /login 에 IP 기반 rate limiting 추가" \
+  --criteria "15분 창/5회 초과 시 429 반환"
+# → .worktrees/rate-limit 생성, mywebapp-leaf-rate-limit 세션 스폰, delegate thread 개설
+
+# Leaf 작업 완료 후, Mid pane 에서 merge + cleanup
+git checkout main && git merge rate-limit --no-ff
+clmux-leaf-stop rate-limit      # worktree + branch + session 일괄 정리
+
+# === Mode B: Mid → Leaf (2-홉, Master 없음) ===
+# 프로젝트 루트에서 바로 시작
+cd ~/Desktop/mywebapp
+clmux-mid csv-importer --scope "CSV 임포트 엔드포인트 추가"
+# → Master 없이 Leaf 스폰, 보고는 user in-pane 으로 수신
+```
+
 ## 명령어 요약
 
 | 옵션 | 설명 |
@@ -285,6 +356,16 @@ SendMessage(to: "copilot-worker", message: "...")
 | `clmux-codex-stop -t <team> [-n <name>]` | Codex teammate 종료 |
 | `clmux-copilot -t <team> [-n <name>] [-x <sec>] [-m <model>]` | Copilot CLI를 teammate로 연결 (예: `-m claude-sonnet-4`) |
 | `clmux-copilot-stop -t <team> [-n <name>]` | Copilot teammate 종료 |
+| `clmux-master [<project>] [--force]` | 현재 pane Master self-init (bare). `<project>` 지정 시 `<project>-mid` 세션 스폰 + chain 배선 |
+| `clmux-master-stop [--force]` | Master self-unregister. peer-down(Mids) 존재 시 `--force` 필요 |
+| `clmux-mid [<leaf-name> --scope "..." [--criteria "..."]] [--force]` | 현재 pane Mid self-init (bare). `<leaf-name>` 지정 시 worktree + Leaf 세션 + delegate thread |
+| `clmux-mid-stop [<project>] [--force] [--cascade]` | Mid 청소. bare=self-kill, `<project>`=Master에서 지정 Mid 정리 |
+| `clmux-leaf [--force]` | worktree pane Leaf self-init (peer-up 필수) |
+| `clmux-leaf-stop <leaf-name> [--force] [--keep-branch] [--keep-worktree]` | Mid pane에서 leaf 청소 (session/worktree/branch 일괄 제거) |
+| `clmux-chain-register --role <r> --pane <id> [--peer-up/-down ...]` | 수동 체인 역할 등록 |
+| `clmux-chain-check [<pane>]` | peer alive 검증 |
+| `clmux-chain-map` | 전체 체인 상태 JSON 스냅샷 |
+| `clmux-chain-unregister [--pane <id>] [--peer-of <upstream>]` | 수동 해제 + upstream peer-down CSV trim |
 
 ## 요구사항
 
@@ -308,6 +389,8 @@ SendMessage(to: "copilot-worker", message: "...")
 - Claude Code는 `~/.claude.json` 등 공유 파일에 대한 동시 쓰기 보호가 없습니다. 동일 디렉토리에서 여러 인스턴스를 실행하면 설정 파일이 손상될 수 있습니다. clmux는 이를 방지하기 위해 라이브 세션 중복 접근을 차단합니다.
 - `ctrl+b d`로 세션을 detach한 후 같은 이름으로 `clmux`를 재실행하면 기존 세션이 orphaned로 판단되어 종료됩니다. agent teams가 아직 실행 중이라면 함께 종료되므로 주의하세요.
 - `clmux-bridge.zsh`는 큰 메시지(>300자)를 300자 단위 청크로 분할하여 paste-buffer로 전달합니다. macOS PTY 버퍼 한계(~1024 bytes)로 인해 단일 paste 이벤트는 잘릴 수 있으며, 청크 분할 방식으로 이를 우회합니다.
+- **함수 업데이트 시 shell 재-source 필요**: `clmux.zsh` (및 `lib/*.zsh`)를 pull/수정한 후, 이미 열려있던 tmux pane의 zsh 세션은 이전 함수 정의를 캐시한 상태를 유지합니다. Claude Code Bash tool 역시 장기 지속 shell을 재사용하므로 새 정의를 보지 못합니다. 처치: 영향받은 pane에서 `exec zsh` 실행(해당 shell 재기동) 또는 새 tmux session 시작.
+- **Chain helper 와 `clmux-bridge.zsh` 이름 구분**: `clmux-bridge.zsh`는 teammate pane 내부에서 실행되는 **릴레이 스크립트**(MCP ↔ CLI). `lib/teammate-{internals,wrappers}.zsh`는 그 릴레이를 띄우는 **zsh 래퍼**. 개념적으로 같은 "bridge teammate" 서브시스템이지만 실행 계층이 다름 — docs/커밋 메시지에서 혼동 주의.
 
 ## 세부 문서
 

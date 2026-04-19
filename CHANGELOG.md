@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — 2026-04-19
+
+### Removed
+- **Pane orchestration protocol (chain Pattern B v1)** — `clmux-orchestrate` CLI, `_orch.py` core, `lib/chain-{spawn,stop,topology}.zsh` chain helpers (`clmux-master` / `clmux-mid` / `clmux-leaf` / `-stop` family), associated tests, and `docs/orchestration.md`. Removed in PR #41 as over-engineered; the live multi-pane delegation protocol it provided was never used in practice.
+- **Family v2 docs (Pattern B v2)** — `docs/superpowers/specs/2026-04-19-family-{teammate-ux-requirements,mvp-design}.md`, `docs/family-smoke-test.md`, README "Family (Pattern B v2)" section. Removed in PR #43; SDK constraint (`Agent()` always allocates same tmux session) made the user-facing requirement (separate-terminal Mid pane) unachievable without a Bridge-style relay we chose not to build.
+- **Pane orchestration plan doc** — `docs/superpowers/plans/2026-04-15-pane-orchestration.md` — orphan plan for chain Pattern B v1; implementation removed in PR #41.
+
+### Decided
+- **Pattern A (clmux-teams + bridge teammates: gemini/codex/copilot) is the sole supported multi-agent pattern going forward.** Hierarchical / parent-child / Family abstractions will not be revisited. See git history for PRs #41–#43 for the full rationale and cross-provider reviews.
+
 ## 1.3.6 — 2026-04-16
 
 ### Fixed

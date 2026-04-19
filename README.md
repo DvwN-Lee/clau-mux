@@ -264,41 +264,6 @@ SendMessage(to: "copilot-worker", message: "...")
 
 ```
 
-### Family (Pattern B v2)
-
-기존 **Team** (Pattern A — Lead 1개 + 가상 multi-pane teammates) 과 별도로, **여러 Claude Code 세션이 별도 tmux pane에서 hierarchical 관계로 협업**하는 패턴.
-
-**핵심 차이:**
-- **Team**: Lead 1개 + N teammates (모두 Lead와 직접 통신, flat)
-- **Family**: Lead 1개 + N Teammates (각자 독립 세션) + Teammates가 자체 Worker subagents fan-out (3-tier)
-
-**MVP scope (v2)**: 1 Lead + 1 Teammate + 2 Workers — fan-out + consolidate 검증.
-
-**핵심 특성:**
-- 모든 통신은 native teammate-message UX (사용자 polling 불필요)
-- Worker는 subagent로 ephemeral (Tier 3) — Teammate에게만 sync 결과 반환, Lead에 직접 통신 불가 (정보 격리 자동)
-- Lead가 직접 `Agent()` SDK tool 호출로 Teammate spawn (zsh wrapper 별도 없음 — 패턴이 곧 구현)
-
-**사용 (요약):**
-
-```
-1. TeamCreate({team_name: "<my-team>"})
-2. Agent({
-     team_name: "<my-team>",
-     name: "<teammate-name>",
-     subagent_type: "general-purpose",
-     model: "sonnet",
-     run_in_background: true,
-     prompt: "<role + scope + Worker 지침 인라인>"
-   })
-3. (Teammate가 자율적으로 Worker fanout + consolidate)
-4. Lead가 native teammate-message로 결과 자동 수신
-```
-
-**상세 가이드 + 재사용 가능한 spawn prompt template + smoke test 절차**: [`docs/family-smoke-test.md`](docs/family-smoke-test.md)
-
-**설계 근거**: [`docs/superpowers/specs/2026-04-19-family-teammate-ux-requirements.md`](docs/superpowers/specs/2026-04-19-family-teammate-ux-requirements.md), [`docs/superpowers/specs/2026-04-19-family-mvp-design.md`](docs/superpowers/specs/2026-04-19-family-mvp-design.md)
-
 ## 명령어 요약
 
 | 옵션 | 설명 |

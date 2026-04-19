@@ -14,6 +14,9 @@
 - macOS + tmux + zsh (existing clmux deps)
 - Claude Code CLI installed and authenticated
 - A primary Claude Code session running (= Lead session). Lead must NOT itself be a teammate of another Lead — Family pattern requires Lead = primary session (Risk B in design doc).
+- **Lead must NOT already be leading another team.** Claude Code SDK constraint: a Lead can only manage one team at a time. `TeamCreate` from a Lead that already leads `<other-team>` returns: *"Already leading team '<other-team>'. A leader can only manage one team at a time. Use TeamDelete to end the current team before creating a new one."* — Discovered during PR-B smoke test 2026-04-19. If you already lead a team for an unrelated purpose, either:
+  - (a) use that existing team and skip Step 1 below (Family pattern works inside any team — just spawn the Family Teammate as a member of the existing team and adapt member names accordingly), or
+  - (b) ask the user to explicitly authorize `TeamDelete <existing-team>` before creating `family-smoke` (per project rule, the agent must NOT call TeamDelete unsolicited).
 
 ---
 
@@ -209,6 +212,7 @@ Respond with only {{expected output format}}.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| TeamCreate returns "Already leading team '<X>'" | Lead already manages another team (SDK 1-team-per-Lead limit) | See §0 Prerequisites — use existing team or get authorization to TeamDelete |
 | Agent() error "team_name not found" | Forgot Step 1 | Run TeamCreate first |
 | Agent() error "name already exists" | Re-running with same teammate name | Use a fresh name or `SendMessage` `shutdown_request` to old one |
 | No teammate-message arrives within 60s | Teammate stuck or didn't understand prompt | `tmux list-panes -a` → find smoke-mid's pane → `tmux capture-pane -t <pane> -p -S -50` to see what it's doing |

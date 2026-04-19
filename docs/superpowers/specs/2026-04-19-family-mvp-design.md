@@ -16,9 +16,10 @@
 **MVP의 한 줄 정의 (revision 2):**
 > Lead Claude Code가 한 명령으로 Teammate 1개를 spawn하여, Teammate가 자체 Worker subagent **2개를 fan-out**하고 결과를 **consolidate**해 Lead에 native teammate-message로 보고할 수 있다.
 
-### 0.2 핵심 가정 (Risk B 명시)
+### 0.2 핵심 가정 (Risk B + Risk C 명시)
 
-- **Lead = primary session**: 본 design은 Lead Claude가 사용자가 대화하는 메인 세션이며, **자체가 또 다른 Lead의 teammate가 아님**을 가정한다. nested teammate (teammate-of-teammate) 는 SDK 차원에서 Agent() 호출이 차단됨 (U1 spike 결과).
+- **Risk B — Lead = primary session**: 본 design은 Lead Claude가 사용자가 대화하는 메인 세션이며, **자체가 또 다른 Lead의 teammate가 아님**을 가정한다. nested teammate (teammate-of-teammate) 는 SDK 차원에서 Agent() 호출이 차단됨 (U1 spike 결과).
+- **Risk C — 1 team per Lead**: SDK 차원에서 한 Lead Claude 세션은 **동시에 1개 team만 관리** 가능. 이미 다른 team을 lead하고 있는 세션에서 `TeamCreate`를 부르면 *"Already leading team '<X>'. A leader can only manage one team at a time"* 로 거부됨 (PR-B smoke test 2026-04-19에서 확인). 이 경우 (a) 기존 team 안에서 Family Teammate를 멤버로 추가하거나, (b) 사용자 명시 권한으로 기존 team을 TeamDelete 후 진행.
 
 ### 0.3 Revision 2 변화 요약
 

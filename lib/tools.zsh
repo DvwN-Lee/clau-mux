@@ -163,9 +163,28 @@ clmux-pane-info() {
   agent=$(tmux display-message -t "$pane_id" -p '#{@agent_name}' 2>/dev/null)
   cli_type=$(tmux display-message -t "$pane_id" -p '#{@cli_type}' 2>/dev/null)
 
+  # ── fallback: native subagents don't set @agent_name on the pane ────────
+  # Bridge teammates (gemini-worker, codex-worker) set @agent_name via
+  # clmux-bridge.zsh. Native Agent()-spawned subagents (claude-sonnet, etc.)
+  # do NOT. Fall back to scanning team config.json for tmuxPaneId match.
+  if [[ -z "$agent" ]]; then
+    local cfg native_team native_agent
+    cfg=$(grep -l "\"tmuxPaneId\": \"$pane_id\"" "$HOME"/.claude/teams/*/config.json 2>/dev/null | head -1)
+    if [[ -n "$cfg" ]]; then
+      native_team="${cfg:h:t}"
+      native_agent=$(grep -B 5 "\"tmuxPaneId\": \"$pane_id\"" "$cfg" 2>/dev/null \
+                      | grep '"name":' | tail -1 \
+                      | sed -E 's/.*"name": "([^"]+)".*/\1/')
+      if [[ -n "$native_agent" ]]; then
+        agent="$native_agent"
+        team_name="$native_team"
+      fi
+    fi
+  fi
+
   # ── team membership lookup (via .${agent}-pane marker + grep config.json) ─
-  # Only attempted when agent name is set.
-  team_name="" member_status=""
+  # Only attempted when agent name is set and team_name not already resolved.
+  team_name="${team_name:-}" member_status=""
   if [[ -n "$agent" ]]; then
     for td in "$HOME"/.claude/teams/*/; do
       marker_file="$td.${agent}-pane"

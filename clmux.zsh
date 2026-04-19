@@ -9,9 +9,7 @@ fi
 export CLMUX_DIR
 
 # Source order matters: teammate-wrappers runs `if _clmux_agent_enabled ...`
-# at source time, so teammate-internals must be loaded first. Chain-stop
-# calls chain-topology helpers at runtime (not source time), so its ordering
-# is cosmetic — but keeping topology first makes the dependency explicit.
+# at source time, so teammate-internals must be loaded first.
 local _clmux_modules=(
   core
   launcher
@@ -19,9 +17,6 @@ local _clmux_modules=(
   teammate-wrappers
   session-utils
   tools
-  chain-topology
-  chain-spawn
-  chain-stop
 )
 for _mod in $_clmux_modules; do
   source "$CLMUX_DIR/lib/${_mod}.zsh"

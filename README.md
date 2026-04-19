@@ -308,6 +308,24 @@ SendMessage(to: "copilot-worker", message: "...")
 - `ctrl+b d`로 세션을 detach한 후 같은 이름으로 `clmux`를 재실행하면 기존 세션이 orphaned로 판단되어 종료됩니다. agent teams가 아직 실행 중이라면 함께 종료되므로 주의하세요.
 - `clmux-bridge.zsh`는 큰 메시지(>300자)를 300자 단위 청크로 분할하여 paste-buffer로 전달합니다. macOS PTY 버퍼 한계(~1024 bytes)로 인해 단일 paste 이벤트는 잘릴 수 있으며, 청크 분할 방식으로 이를 우회합니다.
 - **함수 업데이트 시 shell 재-source 필요**: `clmux.zsh` (및 `lib/*.zsh`)를 pull/수정한 후, 이미 열려있던 tmux pane의 zsh 세션은 이전 함수 정의를 캐시한 상태를 유지합니다. Claude Code Bash tool 역시 장기 지속 shell을 재사용하므로 새 정의를 보지 못합니다. 처치: 영향받은 pane에서 `exec zsh` 실행(해당 shell 재기동) 또는 새 tmux session 시작.
+- **Powerlevel10k + `zsh -ic` 노이즈** (사용자 환경 한정): `~/.zshrc` 가 Powerlevel10k 를 사용하면 README가 권장하는 `zsh -ic "clmux-..."` 호출에서 다음 메시지가 stderr 로 출력될 수 있습니다.
+  ```
+  (anon):setopt:7: can't change option: monitor
+  [ERROR]: gitstatus failed to initialize.
+  ```
+  원인은 `zsh -ic` 가 interactive 플래그는 켜지만 controlling TTY 가 없어, P10k 의 worker 가 `setopt monitor` 와 gitstatus daemon 초기화에 실패하기 때문. **exit code 0, 기능 영향 없음** — 모든 clmux 호출은 정상 작동합니다.
+  근본 해결은 `~/.zshrc` 의 P10k load 줄을 TTY 가드로 감싸는 것:
+  ```zsh
+  # 기존: 무조건 source
+  # [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
+  # source /opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme
+
+  # 수정: stdin 이 TTY 일 때만 load (zsh -ic 호출 시 자동 skip)
+  if [[ -t 0 ]]; then
+    [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
+    source /opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme
+  fi
+  ```
 
 ## 세부 문서
 

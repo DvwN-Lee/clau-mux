@@ -978,6 +978,119 @@ def end_meeting(meeting_id: str, synthesis: str) -> None:
     release_meeting(meeting_id)
 
 
+# ─── threads (query) ────────────────────────────────────────────────────────
+
+def list_threads(pane_id: str | None = None, role: str = "any",
+                 state: str = "any") -> list[dict]:
+    """Return thread index entries filtered by pane, role, and state.
+
+    Parameters
+    ----------
+    pane_id : str | None
+        Restrict to threads where this pane is the delegator and/or target
+        (assignee), controlled by ``role``. ``None`` = no pane filter.
+    role : str
+        "target"    — threads where pane_id is the assignee.
+        "delegator" — threads where pane_id is the delegator.
+        "any"       — either side (or all threads when pane_id is None).
+    state : str
+        "open"   — exclude CLOSED threads.
+        "closed" — only CLOSED threads.
+        "any"    — all states (default).
+    """
+    idx = read_thread_index()
+    results: list[dict] = []
+    for tid, meta in idx.items():
+        # ── state filter ───────────────────────────────────────────────────
+        thread_state = meta.get("state", "")
+        if state == "open" and thread_state == "CLOSED":
+            continue
+        if state == "closed" and thread_state != "CLOSED":
+            continue
+
+        # ── pane / role filter ─────────────────────────────────────────────
+        if pane_id is not None:
+            is_delegator = meta.get("delegator") == pane_id
+            is_assignee = meta.get("assignee") == pane_id
+            if role == "target" and not is_assignee:
+                continue
+            if role == "delegator" and not is_delegator:
+                continue
+            if role == "any" and not (is_delegator or is_assignee):
+                continue
+
+        # ── timestamp enrichment from JSONL ───────────────────────────────
+        # created_at comes from index (written at open_thread time).
+        # last_envelope_at = ts of the last valid JSONL record.
+        created_at = meta.get("created_at", "")
+        last_envelope_at = ""
+        records = read_thread(tid)
+        if records:
+            last_envelope_at = records[-1].get("ts", "")
+
+        results.append({
+            "thread_id": tid,
+            "state": thread_state,
+            "delegator": meta.get("delegator", ""),
+            "assignee": meta.get("assignee", ""),
+            "parent_thread_id": meta.get("parent_thread_id"),
+            "created_at": created_at,
+            "last_envelope_at": last_envelope_at,
+        })
+    return results
+
+
+# ─── notify (standalone, no thread) ─────────────────────────────────────────
+
+def post_notify(from_pane: str, to_pane: str, kind: str,
+                summary: str, body: str = "") -> str:
+    """Post a fire-and-forget notification envelope to to_pane's inbox.
+
+    Does NOT create a thread or touch the thread index. The notification is
+    recorded only in the recipient's inbox (and optionally notified via tmux).
+
+    Returns the envelope id (a random string).
+    """
+    ensure_layout()
+    eid = _rand_id("e")
+    ts = _now_ts()
+    # Write a minimal notify record directly to a standalone notify log file
+    # so the audit trail exists without polluting the thread JSONL files.
+    notify_log = root() / "inbox" / f"notify-{to_pane}.jsonl"
+    notify_log.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "id": eid,
+        "ts": ts,
+        "from": from_pane,
+        "to": to_pane,
+        "kind": "notify",
+        "subkind": kind,
+        "summary": summary,
+        "body": body,
+    }
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    with file_lock(str(notify_log)):
+        with sigterm_guard():
+            with open(notify_log, "a", encoding="utf-8") as f:
+                f.write(line)
+
+    # Add to recipient's inbox alert queue (the standard path read by `inbox`)
+    add_inbox_alert(to_pane, {
+        "kind": "notify",
+        "subkind": kind,
+        "summary": summary,
+        "envelope_id": eid,
+        "from": from_pane,
+    })
+
+    # Best-effort tmux notification
+    notify_pane(
+        to_pane,
+        f"# orch:notify kind={kind} from={from_pane} — run: clmux-orchestrate inbox --pane {to_pane}",
+    )
+    return eid
+
+
 # ─── resume ─────────────────────────────────────────────────────────────────
 
 _IN_FLIGHT_STATES = {"CREATED", "IN_PROGRESS", "REPORTED"}

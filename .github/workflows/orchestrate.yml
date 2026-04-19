@@ -57,3 +57,6 @@ jobs:
       - name: Parity integration test
         run: bash tests/test_parity_integration.sh
         timeout-minutes: 2
+      - name: Chain integration test (3-layer routing)
+        run: bash tests/test_chain_integration.sh
+        timeout-minutes: 1

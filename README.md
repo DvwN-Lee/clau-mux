@@ -284,6 +284,10 @@ SendMessage(to: "copilot-worker", message: "...")
 | `clmux-codex-stop -t <team> [-n <name>]` | Codex teammate 종료 |
 | `clmux-copilot -t <team> [-n <name>] [-x <sec>] [-m <model>]` | Copilot CLI를 teammate로 연결 (예: `-m claude-sonnet-4`) |
 | `clmux-copilot-stop -t <team> [-n <name>]` | Copilot teammate 종료 |
+| `clmux-pane-info [<pane>] [-n <lines>]` | 단일 pane 검사 — process + agent + team + recent output (단일 진입점) |
+| `clmux-team-inspect [<team>]` | 단일 team 검사 — config + members + inboxes (default = 가장 최근 team) |
+| `clmux-teammate-check --team <team> --to <agent>` | Teammate liveness ping (응답 여부 확인) |
+| `clmux-send --to <pane> --prompt '<text>' [--clear --no-enter --wait-idle --timeout <sec> --force]` | structured prompt를 pane에 송부 (raw send-keys 대체) |
 
 ## 요구사항
 

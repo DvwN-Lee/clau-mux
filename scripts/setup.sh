@@ -137,24 +137,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Copilot MCP 등록 (~/.copilot/mcp-config.json) — npx 기반
+# 5. Copilot MCP 등록 — 현재 사용 불가 (force-skip)
 # ---------------------------------------------------------------------------
-read -r -p "Use Copilot as teammate? [Y/n] " copilot_answer
-copilot_answer="${copilot_answer:-Y}"
-
-if [[ "$copilot_answer" =~ ^[Yy]$ ]]; then
-  COPILOT_ENABLED=1
-  if command -v copilot >/dev/null 2>&1; then
-    python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" npx
-    echo "[OK]   Registered clau_mux_bridge (npx) in ~/.copilot/mcp-config.json"
-  else
-    echo "[WARN] copilot CLI not found — install @github/copilot to use Copilot teammate"
-  fi
-  append_protocol "$CLMUX_DIR/prompt/COPILOT.md" "$HOME/.copilot/instructions.md"
-else
-  COPILOT_ENABLED=0
-  echo "[SKIP] Copilot teammate disabled"
-fi
+COPILOT_ENABLED=0
+echo "[SKIP] Copilot teammate is currently unavailable — skipped"
 
 cat > "$CLMUX_DIR/.agents-enabled" <<CONF
 GEMINI_ENABLED=${GEMINI_ENABLED:-1}

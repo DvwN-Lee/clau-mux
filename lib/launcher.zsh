@@ -34,7 +34,7 @@ clmux() {
       codex_flag=1
       ((i++))
     elif [[ "${args[$i]}" == "-c" ]]; then
-      copilot_flag=1
+      echo "warning: Copilot teammate is currently unavailable; -c flag ignored." >&2
       ((i++))
     elif [[ "${args[$i]}" == "-T" ]]; then
       if [[ $((i+1)) -gt ${#args[@]} ]] || [[ "${args[$((i+1))]}" == -* ]]; then

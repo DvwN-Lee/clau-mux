@@ -296,6 +296,8 @@ _clmux_stop_agent() {
 # ── _clmux_agent_enabled ──────────────────────────────────────────────────────
 _clmux_agent_enabled() {
   local agent="$1"
+  # Copilot teammate is currently unavailable — force-disable; remove to restore.
+  [[ "$agent" == "copilot" ]] && return 1
   local config="$CLMUX_DIR/.agents-enabled"
   [[ ! -f "$config" ]] && return 0
   local key="${agent:u}_ENABLED"

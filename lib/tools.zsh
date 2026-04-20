@@ -115,3 +115,125 @@ clmux-teammates() {
     done
   done
 }
+
+# ── clmux-pane-info ───────────────────────────────────────────────────────────
+# Single-entry inspection of a tmux pane: process, agent registration, team
+# membership status, and recent output capture. Replaces ad-hoc combinations of
+# tmux display-message + capture-pane + ~/.claude/teams/*/config.json reads.
+# Usage: clmux-pane-info [<pane_id>] [-n <lines>]
+# Defaults: pane=$TMUX_PANE, lines=30. -n 0 skips capture.
+clmux-pane-info() {
+  # All locals declared upfront (zsh style)
+  local pane_id="" capture_lines=30
+  local arg
+  local cmd pid addr sess win pane_idx
+  local agent cli_type
+  local team_name member_status
+  local td marker_file team_cfg isactive_line
+
+  # ── argument parsing ─────────────────────────────────────────────────────
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    case "$arg" in
+      -n) shift; capture_lines="$1"; shift ;;
+      -*) echo "error: unknown option $arg" >&2; return 1 ;;
+      *)  pane_id="$arg"; shift ;;
+    esac
+  done
+
+  # ── resolve default pane ─────────────────────────────────────────────────
+  if [[ -z "$pane_id" ]]; then
+    if [[ -z "$TMUX_PANE" ]]; then
+      echo "error: not inside tmux, specify <pane_id>" >&2; return 1
+    fi
+    pane_id="$TMUX_PANE"
+  fi
+
+  # ── verify pane exists ───────────────────────────────────────────────────
+  if ! tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qxF "$pane_id"; then
+    echo "error: pane $pane_id not found" >&2; return 1
+  fi
+
+  # ── collect tmux display-message fields ──────────────────────────────────
+  cmd=$(tmux display-message -t "$pane_id" -p '#{pane_current_command}' 2>/dev/null)
+  pid=$(tmux display-message -t "$pane_id" -p '#{pane_pid}' 2>/dev/null)
+  sess=$(tmux display-message -t "$pane_id" -p '#{session_name}' 2>/dev/null)
+  win=$(tmux display-message -t "$pane_id" -p '#{window_index}' 2>/dev/null)
+  pane_idx=$(tmux display-message -t "$pane_id" -p '#{pane_index}' 2>/dev/null)
+  agent=$(tmux display-message -t "$pane_id" -p '#{@agent_name}' 2>/dev/null)
+  cli_type=$(tmux display-message -t "$pane_id" -p '#{@cli_type}' 2>/dev/null)
+
+  # ── fallback: native subagents don't set @agent_name on the pane ────────
+  # Bridge teammates (gemini-worker, codex-worker) set @agent_name via
+  # clmux-bridge.zsh. Native Agent()-spawned subagents (claude-sonnet, etc.)
+  # do NOT. Fall back to scanning team config.json for tmuxPaneId match.
+  if [[ -z "$agent" ]]; then
+    local cfg native_team native_agent
+    cfg=$(grep -l "\"tmuxPaneId\": \"$pane_id\"" "$HOME"/.claude/teams/*/config.json 2>/dev/null | head -1)
+    if [[ -n "$cfg" ]]; then
+      native_team="${cfg:h:t}"
+      native_agent=$(grep -B 5 "\"tmuxPaneId\": \"$pane_id\"" "$cfg" 2>/dev/null \
+                      | grep '"name":' | tail -1 \
+                      | sed -E 's/.*"name": "([^"]+)".*/\1/')
+      if [[ -n "$native_agent" ]]; then
+        agent="$native_agent"
+        team_name="$native_team"
+      fi
+    fi
+  fi
+
+  # ── team membership lookup (via .${agent}-pane marker + grep config.json) ─
+  # Only attempted when agent name is set and team_name not already resolved.
+  team_name="${team_name:-}" member_status=""
+  if [[ -n "$agent" ]]; then
+    for td in "$HOME"/.claude/teams/*/; do
+      marker_file="$td.${agent}-pane"
+      if [[ -f "$marker_file" ]]; then
+        team_name="${td##*/teams/}"
+        team_name="${team_name%/}"
+        break
+      fi
+    done
+
+    if [[ -n "$team_name" ]]; then
+      team_cfg="$HOME/.claude/teams/${team_name}/config.json"
+      if [[ -f "$team_cfg" ]]; then
+        # Approximation: grep for the agent name block then extract isActive.
+        # Works for well-formed config.json; may mis-fire if field is >5 lines away.
+        isactive_line=$(grep -A 5 "\"name\": \"${agent}\"" "$team_cfg" 2>/dev/null \
+          | grep -o '"isActive": [a-z]*' | head -1)
+        if [[ "$isactive_line" == *"true"* ]]; then
+          member_status="alive"
+        elif [[ "$isactive_line" == *"false"* ]]; then
+          member_status="inactive"
+        else
+          member_status="unknown"
+        fi
+      fi
+    fi
+  fi
+
+  # ── output ───────────────────────────────────────────────────────────────
+  printf "pane:        %s\n" "$pane_id"
+  printf "session:     %s\n" "$sess"
+  printf "window.pane: %s.%s\n" "$win" "$pane_idx"
+  printf "process:     %s (pid %s)\n" "$cmd" "$pid"
+
+  if [[ -n "$agent" ]]; then
+    printf "agent:       %s (cli_type: %s)\n" "$agent" "${cli_type:-unknown}"
+  fi
+
+  if [[ -n "$team_name" ]]; then
+    printf "team:        %s (member status: %s)\n" "$team_name" "${member_status:-unknown}"
+  fi
+
+  # ── recent output capture ────────────────────────────────────────────────
+  if [[ "$capture_lines" -ne 0 ]]; then
+    local neg_lines=$(( -capture_lines ))
+    printf "last %s lines:\n" "$capture_lines"
+    printf "  %s\n" "─────────────────────────────────"
+    tmux capture-pane -t "$pane_id" -p -S "$neg_lines" 2>/dev/null \
+      | sed 's/^/  /'
+    printf "  %s\n" "─────────────────────────────────"
+  fi
+}

@@ -370,3 +370,76 @@ clmux-team-inspect() {
     done
   fi
 }
+
+# ── clmux-sessions ────────────────────────────────────────────────────────────
+# List all tmux sessions in a single command — replaces raw `tmux list-sessions`.
+# Per session: name, window count, active pane id, active pane current command.
+# Usage: clmux-sessions [--filter <pattern>]
+# Pattern is zsh fnmatch (e.g., 'clau-mux*'). No filter = list all.
+clmux-sessions() {
+  # All locals declared upfront (zsh style)
+  local pattern="" arg
+  local -a raw_sessions=() filtered=()
+  local line name wins pane_info active_pane active_cmd
+  local total
+
+  # ── argument parsing ──────────────────────────────────────────────────────
+  while (( $# > 0 )); do
+    arg="$1"
+    case "$arg" in
+      --filter) shift; pattern="$1"; shift ;;
+      -h|--help) echo "Usage: clmux-sessions [--filter <pattern>]"; return 0 ;;
+      *) echo "error: unknown option '$arg'" >&2; return 1 ;;
+    esac
+  done
+
+  # ── enumerate sessions ────────────────────────────────────────────────────
+  # Use $'\t' (ANSI-C quoting) for a real tab — tmux does not expand \t in -F.
+  raw_sessions=("${(@f)$(tmux list-sessions -F $'#{session_name}\t#{session_windows}' 2>/dev/null)}")
+
+  if (( ${#raw_sessions} == 0 )) || [[ -z "${raw_sessions[1]}" ]]; then
+    echo "error: no tmux sessions" >&2
+    return 1
+  fi
+
+  # ── apply optional filter ─────────────────────────────────────────────────
+  for line in "${raw_sessions[@]}"; do
+    [[ -z "$line" ]] && continue
+    name="${line%%$'\t'*}"
+    if [[ -n "$pattern" ]]; then
+      [[ "$name" == $~pattern ]] && filtered+=("$line")
+    else
+      filtered+=("$line")
+    fi
+  done
+
+  if [[ -n "$pattern" ]] && (( ${#filtered} == 0 )); then
+    echo "(no sessions match pattern '$pattern')"
+    return 0
+  fi
+
+  # ── output header ─────────────────────────────────────────────────────────
+  total=${#filtered[@]}
+  printf "SESSIONS (%s active):\n" "$total"
+
+  # ── per-session detail ────────────────────────────────────────────────────
+  for line in "${filtered[@]}"; do
+    name="${line%%$'\t'*}"
+    wins="${line#*$'\t'}"
+
+    # Get active pane id + current command for this session
+    pane_info=$(tmux list-panes -t "${name}:" -F $'#{?pane_active,#{pane_id}\t#{pane_current_command},}' 2>/dev/null \
+      | grep -v '^$' | head -1)
+
+    if [[ -n "$pane_info" ]]; then
+      active_pane="${pane_info%%$'\t'*}"
+      active_cmd="${pane_info#*$'\t'}"
+    else
+      active_pane="(none)"
+      active_cmd="(none)"
+    fi
+
+    printf "  %-25s %s windows  active=%-6s  cmd=%s\n" \
+      "$name" "$wins" "$active_pane" "$active_cmd"
+  done
+}

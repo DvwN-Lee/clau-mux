@@ -12,8 +12,13 @@
  * Config resolution order (first wins):
  *   1. CLI args: --outbox <path> --agent <name>
  *   2. Env vars: CLMUX_OUTBOX, CLMUX_AGENT
- *   3. Fallback: scans ~/.claude/teams/ for .bridge-<agent>.env files
- *      (Codex CLI clears parent env via env_clear())
+ *
+ * If neither is provided the server exits immediately. A previous
+ * `.bridge-<agent>.env` mtime-scan fallback was removed: it caused
+ * standalone CLI sessions (notably Gemini launched outside clmux-gemini)
+ * to silently adopt an unrelated active team's outbox + agent identity
+ * and forge write_to_lead entries into the wrong outbox. See
+ * docs/investigations/orphan-env-fallback-2026-04-20.md.
  */
 
 'use strict';
@@ -40,54 +45,23 @@ for (let i = 0; i < cliArgs.length; i++) {
 if (!OUTBOX)     OUTBOX     = process.env.CLMUX_OUTBOX || '';
 if (!AGENT_NAME) AGENT_NAME = process.env.CLMUX_AGENT  || '';
 
-// ── Fallback: scan ~/.claude/teams/ for .bridge-<agent>.env files ────────────
-//    In multi-team environments, select the most recently modified file.
+// ── Fail fast: reject spawns that never got a team identity ─────────────────
+// A standalone CLI (e.g. user runs `gemini` in ~/Desktop) can spawn this
+// MCP server via a generic `clau-mux-bridge` entry in its settings. Without
+// explicit OUTBOX/AGENT we refuse to serve — previously a mtime-based
+// .bridge-<agent>.env fallback would pick the most-recently-active team
+// and the standalone CLI's write_to_lead calls ended up in that team's
+// outbox under the wrong `from` (the orphan-env bug, 2026-04-20).
 
-if (!OUTBOX) {
-  try {
-    const teamsDir = path.join(process.env.HOME || '', '.claude', 'teams');
-    const teams = fs.readdirSync(teamsDir);
-    const candidates = [];
-    for (const team of teams) {
-      const teamPath = path.join(teamsDir, team);
-      try {
-        const entries = fs.readdirSync(teamPath).filter(f => f.startsWith('.bridge-') && f.endsWith('.env'));
-        for (const f of entries) {
-          const fullPath = path.join(teamPath, f);
-          try {
-            const mtime = fs.statSync(fullPath).mtimeMs;
-            candidates.push({ fullPath, mtime });
-          } catch (_) {}
-        }
-      } catch (e) {
-        process.stderr.write('[clmux-bridge] fallback scan error (team): ' + e.message + '\n');
-      }
-    }
-    candidates.sort((a, b) => b.mtime - a.mtime);
-    for (const { fullPath } of candidates) {
-      try {
-        const lines = fs.readFileSync(fullPath, 'utf-8').split('\n');
-        const cfg = {};
-        for (const line of lines) {
-          const [k, ...v] = line.split('=');
-          if (k) cfg[k.trim()] = v.join('=').trim();
-        }
-        if (cfg.CLMUX_OUTBOX) {
-          const teamFromEnvPath = fullPath.match(/teams\/([^/]+)\//)?.[1];
-          const teamFromOutbox  = (cfg.CLMUX_OUTBOX || '').match(/teams\/([^/]+)\//)?.[1];
-          if (!teamFromEnvPath || !teamFromOutbox || teamFromEnvPath !== teamFromOutbox) continue;
-          if (cfg.CLMUX_TEAM && cfg.CLMUX_TEAM !== teamFromEnvPath) continue;
-          OUTBOX     = cfg.CLMUX_OUTBOX;
-          AGENT_NAME = AGENT_NAME || cfg.CLMUX_AGENT || '';
-          break;
-        }
-      } catch (e) {
-        process.stderr.write('[clmux-bridge] fallback scan error (file): ' + e.message + '\n');
-      }
-    }
-  } catch (e) {
-    process.stderr.write('[clmux-bridge] fallback scan error: ' + e.message + '\n');
-  }
+if (!OUTBOX || !AGENT_NAME) {
+  process.stderr.write(
+    '[clmux-bridge] fatal: no team identity configured.\n' +
+    '  Provide --outbox <path> --agent <name> OR env CLMUX_OUTBOX/CLMUX_AGENT.\n' +
+    '  Standalone CLI sessions (gemini/codex/copilot not launched via clmux-*) must not\n' +
+    '  register clau-mux-bridge as an MCP server — remove the entry from that tool\'s\n' +
+    '  settings if you see this message.\n'
+  );
+  process.exit(1);
 }
 
 // ── Path validation ──────────────────────────────────────────────────────────
@@ -267,6 +241,9 @@ function startStdio() {
       messageQueue.push(msg);
     }
   });
+  // Parent CLI closed stdin → exit so MCP subprocess does not linger and
+  // continue accepting writes after its intended session is over.
+  rl.on('close', () => process.exit(0));
 
   ready = true;
   for (const msg of messageQueue) {

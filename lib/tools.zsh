@@ -237,3 +237,136 @@ clmux-pane-info() {
     printf "  %s\n" "─────────────────────────────────"
   fi
 }
+
+# ── clmux-team-inspect ────────────────────────────────────────────────────────
+# Single-entry dump of a team's config.json + inbox state. Replaces raw
+# cat ~/.claude/teams/<team>/config.json + manual json parsing patterns.
+# Usage: clmux-team-inspect [<team_name>]
+# Default: most recently modified team in ~/.claude/teams/
+clmux-team-inspect() {
+  # All locals declared upfront (zsh style)
+  local team="" cfg teams_dir="$HOME/.claude/teams"
+  local helper="/tmp/_clmux_ti_helper.py" out="/tmp/_clmux_ti_out.tsv"
+  local line key val rest
+  local team_name created_epoch epoch_sec created_str description lead members_count
+  local inbox_dir inbox_file inbox_base inbox_count inbox_latest
+  local total_msgs total_files
+  local name agentType paneId isActive model_short
+
+  # ── argument parsing ──────────────────────────────────────────────────────
+  while (( $# > 0 )); do
+    case "$1" in
+      -h|--help) echo "Usage: clmux-team-inspect [<team_name>]"; return 0 ;;
+      *) [[ -z "$team" ]] && team="$1" || { echo "error: extra arg '$1'" >&2; return 1; }; shift ;;
+    esac
+  done
+
+  # ── resolve team ──────────────────────────────────────────────────────────
+  if [[ -z "$team" ]]; then
+    [[ ! -d "$teams_dir" ]] && { echo "error: no teams found in ~/.claude/teams/" >&2; return 1; }
+    cfg=$(ls -t "$teams_dir"/*/config.json 2>/dev/null | head -1)
+    [[ -z "$cfg" ]] && { echo "error: no teams found in ~/.claude/teams/" >&2; return 1; }
+    team="${cfg:h:t}"
+  else
+    cfg="$teams_dir/$team/config.json"
+    [[ ! -f "$cfg" ]] && { echo "error: team '$team' not found" >&2; return 1; }
+  fi
+
+  # ── write python helper to /tmp (regenerated each invocation) ────────────
+  # Uses printf lines — no heredoc. Each printf call is a single shell statement.
+  printf '%s\n' 'import json,sys' > "$helper"
+  printf '%s\n' 'cfg=json.load(open(sys.argv[1]))' >> "$helper"
+  printf '%s\n' 'print("NAME\t"+cfg.get("name",""))' >> "$helper"
+  printf '%s\n' 'print("CREATED\t"+str(cfg.get("createdAt","")))' >> "$helper"
+  printf '%s\n' 'print("DESC\t"+cfg.get("description","")[:80])' >> "$helper"
+  printf '%s\n' 'print("LEAD\t"+cfg.get("leadAgentId",""))' >> "$helper"
+  printf '%s\n' 'members=cfg.get("members",[])' >> "$helper"
+  printf '%s\n' 'print("MEMBERS_COUNT\t"+str(len(members)))' >> "$helper"
+  printf '%s\n' 'for m in members:' >> "$helper"
+  printf '%s\n' '  ms=m.get("model","")' >> "$helper"
+  printf '%s\n' '  if ms.startswith("claude-"): ms=ms[7:]' >> "$helper"
+  printf '%s\n' '  if "[" in ms: ms=ms[:ms.index("[")]' >> "$helper"
+  printf '%s\n' '  ia=m.get("isActive",None)' >> "$helper"
+  printf '%s\n' '  a="?" if ia is None else ("true" if ia else "false")' >> "$helper"
+  printf '%s\n' '  pane=m.get("tmuxPaneId","") or "(none)"' >> "$helper"
+  printf '%s\n' '  print("MEMBER\t"+m.get("name","")+"\t"+m.get("agentType","")+"\t"+pane+"\t"+a+"\t"+(ms or "(none)"))' >> "$helper"
+
+  python3 "$helper" "$cfg" > "$out" 2>/dev/null
+
+  # ── parse TSV output ──────────────────────────────────────────────────────
+  team_name="" created_epoch="" description="" lead="" members_count=0
+  local -a member_lines=()
+
+  while IFS=$'\t' read -r key val rest; do
+    case "$key" in
+      NAME)          team_name="$val" ;;
+      CREATED)       created_epoch="$val" ;;
+      DESC)          description="$val" ;;
+      LEAD)          lead="$val" ;;
+      MEMBERS_COUNT) members_count="$val" ;;
+      MEMBER)        member_lines+=("$val"$'\t'"$rest") ;;
+    esac
+  done < "$out"
+
+  # ── format createdAt epoch (ms) → ISO ────────────────────────────────────
+  if [[ -n "$created_epoch" && "$created_epoch" =~ ^[0-9]+$ ]]; then
+    epoch_sec=$(( created_epoch / 1000 ))
+    created_str=$(date -r "$epoch_sec" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || printf '%s' "$created_epoch")
+  else
+    created_str="(unknown)"
+  fi
+
+  # ── header output ─────────────────────────────────────────────────────────
+  printf "team:        %s\n" "$team_name"
+  printf "created:     %s\n" "$created_str"
+  printf "description: %s\n" "$description"
+  printf "lead:        %s\n" "$lead"
+  printf "members (%s):\n" "$members_count"
+  printf "  %s\n" "─────────────────────────────────"
+
+  # ── members table ─────────────────────────────────────────────────────────
+  # Each MEMBER line: name TAB agentType TAB paneId TAB isActive TAB model
+  # paneId and model are guaranteed non-empty ("(none)" sentinel from helper).
+  for line in "${member_lines[@]}"; do
+    name="${line%%$'\t'*}"; rest="${line#*$'\t'}"
+    agentType="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    paneId="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+    isActive="${rest%%$'\t'*}"
+    model_short="${rest#*$'\t'}"
+    printf "  %-20s %-22s pane=%-8s active=%-6s model=%s\n" \
+      "$name" "$agentType" "$paneId" "$isActive" "$model_short"
+  done
+
+  # ── inboxes section ───────────────────────────────────────────────────────
+  inbox_dir="$teams_dir/$team/inboxes"
+  total_msgs=0 total_files=0
+  local -a inbox_entries=()
+
+  if [[ -d "$inbox_dir" ]]; then
+    for inbox_file in "$inbox_dir"/*.json(N); do
+      inbox_base="${inbox_file:t}"
+      # single-line python3 -c calls are allowed per CLAUDE.md (only multiline prohibited)
+      inbox_count=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(len(d) if isinstance(d,list) else 0)" "$inbox_file" 2>/dev/null)
+      [[ -z "$inbox_count" ]] && inbox_count=0
+      inbox_latest=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); ts=[m.get('timestamp','') for m in d if isinstance(m,dict) and m.get('timestamp')]; print(ts[-1] if ts else 'empty')" "$inbox_file" 2>/dev/null)
+      [[ -z "$inbox_latest" ]] && inbox_latest="empty"
+      total_msgs=$(( total_msgs + inbox_count ))
+      (( total_files++ ))
+      inbox_entries+=("${inbox_base}	${inbox_count}	${inbox_latest}")
+    done
+  fi
+
+  printf "inboxes (%s messages total across %s files):\n" "$total_msgs" "$total_files"
+  printf "  %s\n" "─────────────────────────────────"
+
+  if (( total_files == 0 )); then
+    printf "  (no inbox files found)\n"
+  else
+    for line in "${inbox_entries[@]}"; do
+      inbox_base="${line%%$'\t'*}"; rest="${line#*$'\t'}"
+      inbox_count="${rest%%$'\t'*}"
+      inbox_latest="${rest#*$'\t'}"
+      printf "  %-30s %3s msgs   (latest: %s)\n" "$inbox_base" "$inbox_count" "$inbox_latest"
+    done
+  fi
+}

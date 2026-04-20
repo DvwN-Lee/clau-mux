@@ -37,9 +37,96 @@ clmux-cleanup() {
   fi
 }
 
+# _clmux_send_resolve_target — resolve a target string to a tmux pane id (%X).
+# Tries 4 stages in order. Prints resolved pane id to stdout on success.
+# Returns 0 on success, 1 on not-found, 2 on ambiguous.
+_clmux_send_resolve_target() {
+  local target="$1"
+  local resolved=""
+
+  # Stage 1: %X exact pane id
+  if [[ "$target" =~ ^%[0-9]+$ ]]; then
+    if tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qx -- "$target"; then
+      echo "$target"
+      return 0
+    fi
+  fi
+
+  # Stage 2: session_name (tmux has-session + get active pane)
+  if tmux has-session -t "$target" 2>/dev/null; then
+    resolved=$(tmux list-panes -t "$target:" -F '#{?pane_active,#{pane_id},}' 2>/dev/null | grep -v '^$' | head -1)
+    if [[ -n "$resolved" ]]; then
+      echo "$resolved"
+      return 0
+    fi
+  fi
+
+  # Stage 3: team:agent (contains colon)
+  if [[ "$target" == *:* ]]; then
+    local team="${target%%:*}" agent="${target#*:}"
+    local cfg="$HOME/.claude/teams/$team/config.json"
+    if [[ -f "$cfg" ]]; then
+      resolved=$(grep -A 5 "\"name\": \"$agent\"" "$cfg" 2>/dev/null | grep '"tmuxPaneId":' | head -1 | sed -E 's/.*"tmuxPaneId": "([^"]+)".*/\1/')
+      if [[ -n "$resolved" ]]; then
+        echo "$resolved"
+        return 0
+      fi
+    fi
+  fi
+
+  # Stage 4: bare agent_name (scan all teams, no colon, no %prefix)
+  if [[ "$target" != *:* && "$target" != %* ]]; then
+    local matches=()
+    local cfg team_name pane_id
+    for cfg in "$HOME"/.claude/teams/*/config.json; do
+      [[ -f "$cfg" ]] || continue
+      team_name="${cfg:h:t}"
+      if grep -q "\"name\": \"$target\"" "$cfg" 2>/dev/null; then
+        pane_id=$(grep -A 5 "\"name\": \"$target\"" "$cfg" 2>/dev/null | grep '"tmuxPaneId":' | head -1 | sed -E 's/.*"tmuxPaneId": "([^"]+)".*/\1/')
+        if [[ -n "$pane_id" ]]; then
+          matches+=("$team_name:$target=$pane_id")
+        fi
+      fi
+    done
+    if (( ${#matches} == 1 )); then
+      echo "${matches[1]##*=}"
+      return 0
+    elif (( ${#matches} > 1 )); then
+      local m cand_team cand_pane
+      echo "error: target '$target' matches ${#matches} candidates:" >&2
+      for m in "${matches[@]}"; do
+        cand_team="${m%%:*}"
+        cand_pane="${m##*=}"
+        echo "  - $cand_team:$target (pane $cand_pane)" >&2
+      done
+      echo "use exact form: clmux-send team:agent \"...\"" >&2
+      return 2
+    fi
+  fi
+
+  # No match — emit error with tried stages and suggestions
+  echo "error: target '$target' not found" >&2
+  echo "  tried: pane-id (%X), session, team:agent, agent" >&2
+  local sugg=() s n cfg
+  while IFS= read -r s; do
+    [[ -n "$s" ]] && sugg+=("$s")
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null | head -3)
+  for cfg in "$HOME"/.claude/teams/*/config.json; do
+    [[ -f "$cfg" ]] || continue
+    while IFS= read -r n; do
+      [[ -n "$n" ]] && sugg+=("$n")
+    done < <(grep '"name":' "$cfg" 2>/dev/null | sed -E 's/.*"name": "([^"]+)".*/\1/' | head -3)
+  done
+  if (( ${#sugg} > 0 )); then
+    echo "  suggestions: ${sugg[*]:0:5}" >&2
+  fi
+  return 1
+}
+
 # clmux-send — send a prompt to a tmux pane via paste-buffer + Enter.
 #
 # Usage:
+#   clmux-send <target> "<text>"                       # positional shortcut
 #   clmux-send --to <pane_id> --prompt "<text>"        # send literal text
 #   clmux-send --to <pane_id> --file <path>            # send file contents
 #   clmux-send --to <pane_id> --prompt "..." --clear   # Ctrl-U first to clear stale input
@@ -47,8 +134,14 @@ clmux-cleanup() {
 #   clmux-send --to <pane_id> --prompt "..." --wait-idle [--timeout 30]
 #                                                      # block until Claude pane shows idle prompt "❯"
 #
+# Target resolution order (positional <target> or --to <target>):
+#   1. %X          — exact pane id
+#   2. session_name — tmux session's active pane
+#   3. team:agent  — lookup ~/.claude/teams/<team>/config.json
+#   4. agent_name  — scan all teams, exact 1 match required
+#
 # Flags:
-#   --to <pane_id>    target tmux pane (e.g. %123). required.
+#   --to <target>     target (pane id, session, team:agent, or bare agent). required.
 #   --prompt <text>   literal text to send. mutually exclusive with --file.
 #   --file <path>     path to file whose contents are sent. alternative to --prompt.
 #   --clear           send Ctrl-U to target before pasting (clears partial input).
@@ -58,6 +151,27 @@ clmux-cleanup() {
 #   --force           bypass slash-command pre-check.
 clmux-send() {
   local pane="" prompt="" file="" clear=0 no_enter=0 wait_idle=0 timeout=30 force=0
+  local positional_count=0
+
+  # Positional shortcut: consume up to 2 leading non-flag args as <target> <text>.
+  while [[ $# -gt 0 && "$1" != --* ]]; do
+    (( positional_count += 1 ))
+    if (( positional_count == 1 )); then
+      pane="$1"; shift
+    elif (( positional_count == 2 )); then
+      prompt="$1"; shift
+    else
+      break
+    fi
+  done
+  # If extra positional args remain after consuming 2, user forgot to quote text.
+  if (( positional_count >= 2 )) && [[ $# -gt 0 && "$1" != --* ]]; then
+    local extra_count=$(( positional_count + $# ))
+    echo "error: text must be quoted (got $extra_count args, expected 2)" >&2
+    echo "  usage: clmux-send <target> \"<text>\"" >&2
+    return 1
+  fi
+
   while [[ $# -gt 0 ]]; do
     case $1 in
       --to)        pane="$2"; shift 2 ;;
@@ -72,8 +186,8 @@ clmux-send() {
     esac
   done
 
-  # Pre-check 1: --to is required.
-  [[ -z "$pane" ]] && { echo "error: --to <pane_id> is required" >&2; return 1; }
+  # Pre-check 1: target is required.
+  [[ -z "$pane" ]] && { echo "error: target is required (use --to <target> or positional: clmux-send <target> \"<text>\")" >&2; return 1; }
 
   # Pre-check 2: exactly one of --prompt or --file.
   if [[ -n "$prompt" && -n "$file" ]]; then
@@ -88,9 +202,10 @@ clmux-send() {
     [[ -f "$file" && -r "$file" ]] || { echo "error: file not found or not readable: $file" >&2; return 1; }
   fi
 
-  # Pre-check 4: target pane exists.
-  tmux list-panes -a -F '#{pane_id}' | grep -qx -- "$pane" \
-    || { echo "error: pane $pane not found" >&2; return 1; }
+  # Pre-check 4: resolve target to pane id via 4-stage resolver.
+  local resolved_pane
+  resolved_pane=$(_clmux_send_resolve_target "$pane") || return $?
+  pane="$resolved_pane"
 
   # Pre-check 5: slash-command guard (only for --prompt; --file is user's responsibility).
   if [[ -n "$prompt" && "$force" -eq 0 ]]; then

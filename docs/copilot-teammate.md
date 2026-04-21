@@ -61,7 +61,7 @@ clmux-copilot-stop -t <team_name>
 
 ## idle 패턴
 
-Copilot의 idle 상태 감지에는 `Enter @ to mention` 문자열을 사용합니다. Gemini의 `Type your message`, Codex의 `›` 패턴과 다릅니다.
+Copilot의 idle 상태 감지에는 `/ commands` 문자열을 사용합니다. Gemini의 `Type your message`, Codex의 `›` 패턴과 다릅니다.
 
 ## 종료 동작
 

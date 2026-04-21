@@ -3,10 +3,6 @@
 Claude Code의 tmux 세션 관리와 Gemini / Codex / Copilot AI teammate 통합을 지원하는 도구입니다.
 
 > **macOS 전용** — macOS + iTerm2 + zsh 환경을 기준으로 개발 및 검증되었습니다.
->
-> **⚠️ Copilot teammate 현재 사용 불가** — Copilot CLI 통합이 일시적으로 비활성화되어 있습니다.
-> `clmux-copilot`, `-c` 플래그, `/clmux-copilot` 스킬 모두 동작하지 않습니다.
-> Gemini(`-g`) / Codex(`-x`) 는 정상 사용 가능합니다.
 
 ## 스크린샷
 
@@ -221,8 +217,6 @@ clmux-codex-stop -t <team_name>
 > **Bridge 내부 동작**: Codex는 instruction-following 특성상 일부 conversational 메시지(예: identity 질문, 짧은 greeting)에 대해 `write_to_lead` 호출을 skip 하는 경향이 있어, bridge 가 codex 전용으로 paste 직전 `[Bridge message — reply via write_to_lead]` prefix 를 자동 추가합니다. Gemini/Copilot 는 이 wrapping 적용되지 않습니다 (해당 모델은 wrapping 없이도 일관 호출).
 
 ### Copilot Teammate
-
-> **⚠️ 현재 사용 불가** — Copilot CLI 통합이 일시적으로 비활성화되어 있습니다. 아래 명령은 `warning: Copilot teammate is currently unavailable` 메시지와 함께 무시됩니다. 재활성화는 `lib/teammate-internals.zsh` 의 `_clmux_agent_enabled` 에서 `[[ "$agent" == "copilot" ]] && return 1` 라인을 제거하세요.
 
 GitHub Copilot CLI를 Claude Code의 teammate로 연결합니다. Copilot은 HTTP/SSE 기반 MCP 서버를 통해 lead에 응답합니다.
 

@@ -2,7 +2,7 @@
 
 Copilot CLI shows a "Confirm folder trust" modal on first launch in an
 unknown directory. The modal blocks the idle prompt, so wait_for_idle
-never detects "Enter @ to mention" and the bridge times out without
+never detects "/ commands" and the bridge times out without
 delivering queued messages.
 
 Copilot stores trusted folders as a JSON array of absolute paths under

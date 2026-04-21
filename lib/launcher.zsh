@@ -34,7 +34,7 @@ clmux() {
       codex_flag=1
       ((i++))
     elif [[ "${args[$i]}" == "-c" ]]; then
-      echo "warning: Copilot teammate is currently unavailable; -c flag ignored." >&2
+      copilot_flag=1
       ((i++))
     elif [[ "${args[$i]}" == "-T" ]]; then
       if [[ $((i+1)) -gt ${#args[@]} ]] || [[ "${args[$((i+1))]}" == -* ]]; then
@@ -90,7 +90,7 @@ clmux() {
         sleep 0.2
       done
       python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${_cp_port}/sse"
-      _clmux_spawn_agent "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 0 -t "$_team"
+      _clmux_spawn_agent "copilot --yolo" copilot-worker "/ commands" paste 1 colour98 0 -t "$_team"
     fi
     command claude "${clmux_args[@]}"
     return
@@ -197,7 +197,7 @@ clmux() {
       sleep 0.2
     done
     python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${_cp2_port}/sse"
-    _clmux_spawn_agent_in_session "$session_name" "copilot --yolo" copilot-worker "Enter @ to mention" paste 1 colour98 0 "$_st_team"
+    _clmux_spawn_agent_in_session "$session_name" "copilot --yolo" copilot-worker "/ commands" paste 1 colour98 0 "$_st_team"
   fi
 
   tmux attach-session -t "=$session_name"

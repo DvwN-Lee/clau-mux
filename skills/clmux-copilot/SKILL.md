@@ -46,7 +46,7 @@ Options:
 
 ### Step 3: Send initial activation message
 
-Immediately after `clmux-copilot` returns, send an activation message via SendMessage. The bridge holds this message in the inbox and delivers it as soon as Copilot is ready (idle pattern: `Enter @ to mention`).
+Immediately after `clmux-copilot` returns, send an activation message via SendMessage. The bridge holds this message in the inbox and delivers it as soon as Copilot is ready (idle pattern: `/ commands`).
 
 ```
 SendMessage(to: "copilot-worker", message: "<user's initial message or default greeting>")
@@ -84,7 +84,7 @@ zsh -ic "clmux-copilot-stop -t <team_name>"
 - **Paste mode**: Copilot TUI requires `tmux paste-buffer` instead of `send-keys` for text input.
 - **Env file**: Copilot CLI runs env_clear on MCP subprocesses. The bridge writes `~/.claude/teams/<team_name>/.bridge-copilot-worker.env` so the MCP server can find `CLMUX_OUTBOX` and `CLMUX_AGENT`.
 - **AGENTS.md**: Copilot reads `AGENTS.md` for project instructions including `write_to_lead` usage.
-- **Idle pattern**: Bridge waits for `Enter @ to mention` before delivering queued messages.
+- **Idle pattern**: Bridge waits for `/ commands` before delivering queued messages.
 
 ## Bridge Behavior
 

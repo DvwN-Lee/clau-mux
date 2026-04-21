@@ -78,7 +78,7 @@ if _clmux_agent_enabled copilot; then
     # Register URL in Copilot mcp-config.json
     python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${port}/sse"
 
-    _clmux_spawn_agent "copilot --allow-all-tools" copilot-worker "Enter @ to mention" paste 1 colour98 0 "$@"
+    _clmux_spawn_agent "copilot --allow-all-tools" copilot-worker "/ commands" paste 1 colour98 0 "$@"
   }
 
   clmux-copilot-stop() {

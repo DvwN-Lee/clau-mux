@@ -44,7 +44,7 @@ Options:
 
 ### Step 3: Send initial activation message
 
-Immediately after `clmux-gemini` returns, send an activation message via SendMessage. The bridge holds this message in the inbox and delivers it as soon as Gemini's MCP servers are ready.
+Immediately after `clmux-gemini` returns, send an activation message via SendMessage. The bridge holds this message in the inbox and delivers it as soon as Gemini's MCP servers are ready (idle pattern: `Type your message`).
 
 ```
 SendMessage(to: "gemini-worker", message: "<user's initial message or default greeting>")
@@ -81,11 +81,15 @@ zsh -ic "clmux-gemini-stop -t <team_name>"
 
 Claude Code's `SendMessage` only routes to file-based inboxes for teams initialized in the current session via `TeamCreate`. Without it, messages are not written to the inbox file, and the bridge cannot deliver them to Gemini.
 
+## Gemini-specific Notes
+
+- **Idle pattern**: Bridge waits for `Type your message` before delivering queued messages.
+
 ## Bridge Behavior
 
 The bridge (`clmux-bridge.zsh`) is an inbox relay only:
 
-- Polls inbox every 2s → sends to Gemini via `tmux send-keys`
+- Polls inbox every 0.5s → sends to Gemini via `tmux send-keys`
 - Does NOT wait for or collect responses
 - On `shutdown_request`: kills pane → writes `shutdown_approved` JSON (with `requestId`) to lead inbox → exits
 - On pane gone (unexpected): writes plain-text shutdown notice to lead inbox (no `requestId`), then exits

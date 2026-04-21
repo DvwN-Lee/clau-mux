@@ -90,7 +90,7 @@ zsh -ic "clmux-copilot-stop -t <team_name>"
 
 The bridge (`clmux-bridge.zsh`) is an inbox relay only:
 
-- Polls inbox every 2s → sends to Copilot via `tmux paste-buffer` + Enter
+- Polls inbox every 0.5s → sends to Copilot via `tmux paste-buffer` + Enter
 - Does NOT wait for or collect responses
 - On `shutdown_request`: kills pane → writes `shutdown_approved` JSON (with `requestId`) to lead inbox → exits
 - On pane gone (unexpected): writes plain-text shutdown notice to lead inbox (no `requestId`), then exits

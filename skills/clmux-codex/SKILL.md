@@ -46,7 +46,7 @@ Options:
 
 ### Step 3: Send initial activation message
 
-Immediately after `clmux-codex` returns, send an activation message via SendMessage. The bridge holds this message in the inbox and delivers it as soon as Codex is ready.
+Immediately after `clmux-codex` returns, send an activation message via SendMessage. The bridge holds this message in the inbox and delivers it as soon as Codex is ready (idle pattern: `^[[:space:]]*›`).
 
 ```
 SendMessage(to: "codex-worker", message: "<user's initial message or default greeting>")
@@ -84,12 +84,13 @@ zsh -ic "clmux-codex-stop -t <team_name>"
 - **Paste mode**: Codex TUI requires `tmux paste-buffer` instead of `send-keys` for text input.
 - **Env file**: Codex CLI runs `env_clear()` on MCP subprocesses. The bridge writes `~/.claude/teams/<team_name>/.bridge-codex-worker.env` so the MCP server can find `CLMUX_OUTBOX` and `CLMUX_AGENT`.
 - **AGENTS.md**: Codex reads `AGENTS.md` (not CODEX.md) for project instructions including `write_to_lead` usage.
+- **Idle pattern**: Bridge waits for `^[[:space:]]*›` before delivering queued messages.
 
 ## Bridge Behavior
 
 The bridge (`clmux-bridge.zsh`) is an inbox relay only:
 
-- Polls inbox every 2s → sends to Codex via `tmux paste-buffer` + Enter
+- Polls inbox every 0.5s → sends to Codex via `tmux paste-buffer` + Enter
 - Does NOT wait for or collect responses
 - On `shutdown_request`: kills pane → writes `shutdown_approved` JSON (with `requestId`) to lead inbox → exits
 - On pane gone (unexpected): writes plain-text shutdown notice to lead inbox (no `requestId`), then exits

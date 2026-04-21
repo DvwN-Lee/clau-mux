@@ -34,25 +34,14 @@ If the project has no `.claude/skills/` directory, only global skills and comman
 
 | Mode | Trigger | Duration |
 |------|---------|---------|
-| Quick Scan | `results.json` exists (default) | 5–10 min |
+| Quick Scan | Not currently implemented — see note below | 5–10 min |
 | Full Audit | `results.json` absent, or `/skills-audit full` | 20–30 min |
 
 **Results cache:** `~/.claude/skills/skills-audit/results.json`
 
 ## Quick Scan Flow
 
-Re-evaluate only skills that have changed since the last run (5–10 min).
-
-1. Read `~/.claude/skills/skills-audit/results.json`
-2. Run: `bash ~/.claude/skills/skills-audit/scripts/quick-diff.sh \
-         ~/.claude/skills/skills-audit/results.json`
-   (Project dir is auto-detected from `$PWD/.claude/skills`; pass it explicitly only if needed)
-3. If output is `[]`: report "No changes since last run." and stop
-4. Re-evaluate only those changed files using the same Phase 2 criteria
-5. Carry forward unchanged skills from previous results
-6. Output only the diff
-7. Run: `bash ~/.claude/skills/skills-audit/scripts/save-results.sh \
-         ~/.claude/skills/skills-audit/results.json <<< "$EVAL_RESULTS"`
+> **Status (2026-04)**: Quick Scan mode is not yet implemented. The helper scripts (`quick-diff.sh`, `save-results.sh`) referenced in earlier drafts have not been landed. Use Full Audit mode until this is resolved.
 
 ## Full Audit Flow
 

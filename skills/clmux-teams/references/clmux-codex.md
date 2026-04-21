@@ -1,0 +1,119 @@
+# Codex Teammate (clmux-codex)
+
+## 역할 특성
+
+- **핵심 강점**: 자율 실행 (--full-auto), Codex Security (792 critical 탐지, 14 CVE 발견), Terminal 최적화
+- **비용**: ChatGPT 구독 포함 (Plus $20/Pro $200) 또는 API 과금
+- **적합 영역**: 보안 분석, 성능 분석, CI/CD 자동화, 코드 리뷰 보조, IaC/DevOps
+
+## Phase별 역할 상세
+
+### P3 BUILD — Boilerplate 병렬 + IaC
+
+Codex는 Claude teammate가 핵심 로직을 TDD로 구현하는 동안 **정의된 패턴의 반복 코드를 병렬 생성**한다.
+
+| 작업 | 구체 내용 |
+|---|---|
+| Boilerplate 생성 | 환경변수 전환, CRUD 반복, 설정 파일 생성 |
+| IaC / DevOps | Terraform, Dockerfile, CI Pipeline 작성 |
+
+**프롬프트 예시:**
+```
+SendMessage(to: "codex-worker", message:
+  "tasks.md의 T-005~T-008 Boilerplate 작업 병렬 생성.
+  각 task의 AC를 충족하는 코드를 생성하고
+  결과를 write_to_lead로 전달.
+  Claude가 TDD 검증 후 통합 진행")
+```
+
+### P4 VERIFY — 보안 스캔 1차 + 성능 분석 1차
+
+Codex는 P4에서 **보안과 성능 검증의 1차 담당**이다.
+
+#### 보안 스캔 (Codex Security)
+
+Codex Security의 검증 파이프라인:
+1. 저장소 스캔 컨텍스트 및 위협 모델 구축
+2. 컨텍스트 기반 취약점 탐지 및 실제 영향도 분류
+3. 격리된 Sandbox 환경에서 PoC 검증
+4. 컨텍스트 인식 패치 제안
+
+| 검사 항목 | 구체 내용 |
+|---|---|
+| Injection | SQL Injection, Command Injection, XSS |
+| 인증 결함 | 인증/인가 우회, 세션 관리 |
+| Secret 노출 | Hardcoded Secret, 환경변수 노출 |
+| 의존성 취약점 | 취약한 transitive dependency |
+
+**프롬프트 예시:**
+```
+SendMessage(to: "codex-worker", message:
+  "현재 Codebase에 대한 보안 취약점 스캔 진행.
+  1. SQL Injection, Command Injection, 인증 결함 순으로 분류
+  2. 각 발견 항목에 심각도(CRITICAL/HIGH/MEDIUM) 부여
+  3. 발견된 취약점과 수정 제안을 write_to_lead로 전달")
+```
+
+#### 성능 분석
+
+| 검사 항목 | 구체 내용 |
+|---|---|
+| 알고리즘 복잡도 | O(n²) 이상 연산, 불필요한 중첩 루프 |
+| 리소스 사용 | 메모리 누수, 닫히지 않은 리소스, 대형 객체 할당 |
+| I/O 연산 | N+1 쿼리 패턴, 동기 Blocking 호출, 캐싱 누락 |
+
+**프롬프트 예시:**
+```
+SendMessage(to: "codex-worker", message:
+  "API Endpoint 전체에 대한 성능 분석 실행.
+  1. N+1 쿼리 패턴 탐지
+  2. 알고리즘 복잡도 O(n²) 이상 지점 식별
+  3. 캐싱 누락 지점 식별
+  4. 결과를 심각도별로 정리하여 write_to_lead로 전달")
+```
+
+### P4 VERIFY — 코드 리뷰 보조
+
+Claude teammate가 V-1~V-4 검증을 수행한 후, Codex가 **보완적 관점에서 리뷰**한다. 다른 학습 데이터와 아키텍처로 Claude가 놓치는 Error Path, Edge Case를 포착한다.
+
+**프롬프트 예시:**
+```
+SendMessage(to: "codex-worker", message:
+  "PR diff를 기반으로 코드 리뷰 진행.
+  Claude 검증에서 놓칠 수 있는 관점에 집중:
+  1. Error path 누락 (예외 미처리, 실패 시 상태 불일치)
+  2. Edge case (빈값, null, 경계값, 동시성)
+  3. 발견 사항을 write_to_lead로 전달")
+```
+
+### P5 REFINE — 재검증 + CI/CD
+
+| 작업 | 구체 내용 |
+|---|---|
+| 보안 재검증 | P4 Critical/High 수정 후 재스캔 |
+| CI Pipeline | GitHub Actions / GitLab CI 파이프라인 구성·검증 |
+| 배포 검증 | Terraform Plan 분석, 예상치 못한 리소스 변경 감지 |
+
+**프롬프트 예시:**
+```
+SendMessage(to: "codex-worker", message:
+  "P4 보안 스캔에서 발견된 CRITICAL 항목 수정 완료.
+  1. 수정된 코드에 대해 보안 재스캔 진행
+  2. 신규 취약점 없음 확인
+  3. 결과를 write_to_lead로 전달")
+```
+
+## Codex 고유 설정
+
+- **Spawn 명령**: `clmux-codex`
+- **기본 agent 이름**: `codex-worker`
+- **실행 모드**: 기본 launch는 `codex --full-auto`. sandbox 정책은 Codex 실행 환경 설정을 따름
+- **Idle pattern**: `›`
+- **모델 예시**: `gpt-5.4`, `gpt-5.4-mini`
+- **모델 지정**: `clmux-codex -t <team> -m gpt-5.4`
+- **MCP approval_mode**: `"approve"` (safety monitor가 non-destructive tool 자동 승인)
+- **Env file**: Codex가 MCP subprocess에서 env를 클리어하므로 bridge가 `.bridge-codex-worker.env` 작성
+- **Instruction source**: Codex는 프로젝트 루트의 `AGENTS.md`를 읽어 teammate protocol(`write_to_lead` 1회 호출)을 따름
+- **종료 주의**: Codex TUI는 plain-text `/exit`가 비안정적이므로 실패 시 `clmux-codex-stop`을 사용
+
+> Spawn/Stop/에러 대응 공통 절차는 [SKILL.md §8](../SKILL.md#8-bridge-공통-사항) 참조.

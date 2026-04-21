@@ -2,9 +2,9 @@
 
 ## 역할 특성
 
-- **핵심 강점**: 자율 실행 (--full-auto), Codex Security (792 critical 탐지, 14 CVE 발견), Terminal 최적화
-- **비용**: ChatGPT 구독 포함 (Plus $20/Pro $200) 또는 API 과금
-- **적합 영역**: 보안 분석, 성능 분석, CI/CD 자동화, 코드 리뷰 보조, IaC/DevOps
+- **핵심 강점**: 자율 실행 (`--full-auto`)[^codex-fullauto], Terminal-Bench 2.0 77.3% (GPT-5.3-Codex + Droid agent)[^codex-terminal]
+- **비용**: 본 팀은 ChatGPT Plus ($20/mo) 사용. Plus 티어는 Codex CLI 접근 (rate-limited), GPT-5.4 / GPT-5.3-Codex 접근 포함. **Codex Security (792 critical, 14 CVE 탐지 실적) 는 Pro $100+ 티어 한정으로 본 팀 미접근**[^codex-pricing]
+- **적합 영역**: 보일러플레이트 생성, 테스트 작성, 코드 리뷰 보조, CI/CD 자동화, IaC/DevOps. 본격 보안 스캔은 Plus 티어 미접근이므로 수행 불가
 
 ## Phase별 역할 상세
 
@@ -117,3 +117,7 @@ SendMessage(to: "codex-worker", message:
 - **종료 주의**: Codex TUI는 plain-text `/exit`가 비안정적이므로 실패 시 `clmux-codex-stop`을 사용
 
 > Spawn/Stop/에러 대응 공통 절차는 [SKILL.md §8](../SKILL.md#8-bridge-공통-사항) 참조.
+
+[^codex-fullauto]: Codex CLI Reference, https://developers.openai.com/codex/cli/reference (retrieved 2026-04-21). `--full-auto` sets `--ask-for-approval on-request` + `--sandbox workspace-write`. In-session toggle: `/mode`. More permissive mode: `--yolo` (`--dangerously-bypass-approvals-and-sandbox`).
+[^codex-terminal]: Terminal-Bench 2.0 leaderboard, https://www.tbench.ai/leaderboard/terminal-bench/2.0 (evaluated 2026-02-24 for GPT-5.3-Codex + Droid: 77.3% ± 2.2; 2026-03-12 for GPT-5.4 + ForgeCode: 81.8% ± 2.0). Score is agent-configuration-dependent. Original source: OpenAI "Introducing GPT-5.3-Codex" (2026-02-05).
+[^codex-pricing]: OpenAI pricing, https://chatgpt.com/pricing (retrieved 2026-04-21). Plus $20/mo (본 팀 기준): GPT-5.4, GPT-5.3-Codex, Codex CLI rate-limited. Pro $100/mo (신설 2026-04-09): 5× Plus usage, Codex Security 포함. Pro $200/mo: 20× Plus usage, Codex Security 포함. Codex Security 접근은 Pro/Enterprise/Business/Edu 한정 — Plus 티어 미접근.

@@ -2,11 +2,11 @@
 
 ## 역할 특성
 
-Copilot 은 **플랫폼 통합 워크플로** 3축에서 다른 provider 로 대체 불가한 고유 이점을 보유한다.
+Copilot 은 **플랫폼 통합 워크플로** 2축에서 다른 provider 로 대체 불가한 고유 이점을 보유한다 (본 팀 tier=Individual Pro $10/mo 기준; Enterprise 전용 축은 적용 불가로 별도 문서화하지 않음).
 
 ### 축 1: Security Loop — CodeQL + Autofix
 
-GitHub 네이티브 폐회로 (탐지 → AI 수정 → PR 머지) 가 동일 플랫폼 안에서 실행되는 **유일 provider**.
+GitHub 네이티브 폐회로 (탐지 → AI 수정 → PR 머지) 가 동일 플랫폼 안에서 실행되는 **유일 provider**. 본 팀은 **public repo** 에서 Autofix 를 사용. Private repo Autofix 는 GitHub Advanced Security (Enterprise) 필요.
 
 - **2025 연간 460,258 alert 자동 수정** (primary: GitHub Blog, 2026-03-23)[^axis1-autofix]
 - **Time-to-fix 1.29h → 0.66h (−49%)**
@@ -23,26 +23,12 @@ GitHub PR UI 에 1급 리뷰어로 native 임베드된 유일 provider. Cross-Pr
 - **전체 GitHub PR 의 >20%** 에 Copilot 관여
 - **71% actionable / 29% silent** (품질 signal — 불필요한 noise 를 억제)
 - 평균 **5.1 comments/review**
-- **12,000+ org 자동 리뷰 활성**
 - Reasoning model 업그레이드로 **+6% positive feedback** (latency +16% 수용)
 
 **피어-리뷰 검증된 코드 품질 효과** (blind peer review, n=243)[^axis2-quality]:
 - Copilot 코드의 unit test 전체 통과 확률 **+53.2%** (p<0.01)
 - 리뷰어 승인률 **+5%** (p=0.014)
 - Readability +3.62%, reliability +2.94%, maintainability +2.47%, conciseness +4.16% (모두 통계적 유의)
-
-### 축 3: Enterprise Compliance
-
-Codex CLI / Claude Code / Gemini CLI 에 현재 동등물이 **없는** 규정 준수 스택.
-
-- **US / EU data residency GA 2026-04-13** (모든 inference 지정 지역 내부 유지). Japan / AU 로드맵 late 2026[^axis3-residency]
-- **FedRAMP Moderate** 동시 GA (2026-04 롤아웃)
-- **SAML SSO + SCIM** identity field 가 audit log 에 기록 (GA 2024-03)
-- **Audit log 180일 보관, SIEM streaming 지원** — 정책 변경 / seat 할당 / agent 활동 로깅. 단 **클라이언트-side prompt 는 미로깅**
-- **Content exclusion**: repo/file 레벨 rule → completion + chat + review 3경로 동시 차단
-- **Business ($19/seat) vs Enterprise ($39/seat) 델타**: Knowledge bases (org codebase indexing), 커스텀 fine-tuned inline model, github.com chat, premium request **300 → 1,000 / seat / month**
-
-> **유의**: Customer-Managed Keys (CMK) 는 Microsoft Copilot Studio 에만 확증, GitHub Copilot inference 는 **공식 문서 확증 없음**. PrivateLink / VPC peering 도 Copilot inference 엔드포인트에 대해 미확증. IP allowlist 는 존재.
 
 ### 기저 모델 (2026-04-21 기준)
 
@@ -91,12 +77,10 @@ Copilot Agent Mode (Workspace) 는 Claude 3.7 Sonnet 기반 **SWE-Bench Verified
 - PR Review 및 GitHub 네이티브 워크플로 (Issue → PR → Merge 파이프라인)
 - 취약점 탐지 후 자동 수정 (CodeQL Autofix 폐회로)
 - 배포 후 Smoke Test + Changelog 생성
-- 규정 준수가 엄격한 엔터프라이즈 (FedRAMP / data residency 필수)
 
 [^axis1-autofix]: GitHub Blog "GitHub expands application security coverage with AI-powered detections" (2026-03-23). 460,258 = 2025 전체 연도 GitHub 자체 집계.
 [^axis2-reviews]: GitHub Blog "60 million Copilot code reviews and counting" (2026-03-05). 기간 2025-04 출시 ~ 2026-03.
 [^axis2-quality]: GitHub Blog "Does GitHub Copilot improve code quality? Here's what the data says" (Nov 2024, updated Feb 2025). n=243 Python 개발자 (≥5yrs), 25 senior 리뷰어의 1,293 blind peer review. GitHub 후원 외부 수행.
-[^axis3-residency]: GitHub Changelog "Copilot data residency in US/EU and FedRAMP compliance now available" (2026-04-13).
 [^model-codex]: OpenAI "Introducing GPT-5.3-Codex" (2026-02-05).
 [^model-agent]: GitHub Blog "GitHub Copilot agent mode activated" (2025-04, updated 2026-04). 메서드 disclosure 없음, swebench.com 리더보드 엔트리 없음.
 

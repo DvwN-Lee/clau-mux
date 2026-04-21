@@ -2,8 +2,8 @@
 
 ## 역할 특성
 
-- **핵심 강점**: 넓은 Context (1M Token), 무료 티어, WebDev Arena #1, LiveCodeBench Pro Elo 2887 (#1)
-- **비용**: 무료 티어 (60 req/min, 1,000 req/day) 또는 $2/$12 per M tokens (Gemini 3.1 Pro)
+- **핵심 강점**: 1M token context[^gemini-1m-context], ARC-AGI-2 77.1% (ARC Prize Verified)[^gemini-arc-agi2], LiveCodeBench Pro Elo 2887 (#1, self-reported leaderboard)[^gemini-livecodebench]
+- **비용**: 본 팀은 Gemini AI Pro 구독 ($20/mo) 사용. Gemini CLI 는 API key 경유 접근 시 pay-per-token 별도 과금 — gemini-3.1-pro-preview $2 / $12 per M tokens (≤200k context), $4 / $18 (>200k)[^gemini-pricing]
 - **적합 영역**: 리서치, 문서 분석, Frontend/UI 구현, Visual Regression, API Spec 생성
 
 ## Phase별 역할 상세
@@ -46,7 +46,7 @@ SendMessage(to: "gemini-worker", message:
 
 ### P3 BUILD — Frontend/UI 구현 보조
 
-Gemini는 WebDev Arena #1로 **Frontend UI 생성에 강점**이 있다. Claude teammate가 Backend 구현에 집중하는 동안 Gemini가 Frontend 컴포넌트 초안을 병렬 생성한다.
+Gemini는 **Frontend UI 생성에 강점**이 있다. Claude teammate가 Backend 구현에 집중하는 동안 Gemini가 Frontend 컴포넌트 초안을 병렬 생성한다.
 
 | 작업 | 구체 내용 |
 |---|---|
@@ -107,3 +107,8 @@ SendMessage(to: "gemini-worker", message:
 - **모델 지정**: `clmux-gemini -t <team> -m gemini-3.1-pro-preview`
 
 > Spawn/Stop/에러 대응 공통 절차는 [SKILL.md §8](../SKILL.md#8-bridge-공통-사항) 참조.
+
+[^gemini-1m-context]: DeepMind Model Card, "Gemini 3.1 Pro" (2026-02-19), https://deepmind.google/models/model-cards/gemini-3-1-pro/ — 1M token input context, 64K output.
+[^gemini-arc-agi2]: DeepMind Model Card + Google Blog, "Gemini 3.1 Pro" (2026-02-19), https://deepmind.google/models/model-cards/gemini-3-1-pro/ — ARC-AGI-2: 77.1% (ARC Prize Verified). Predecessor Gemini 3 Pro scored ~31%.
+[^gemini-livecodebench]: DeepMind Model Card, "Gemini 3.1 Pro" (2026-02-19), https://deepmind.google/models/model-cards/gemini-3-1-pro/ — LiveCodeBench Pro Elo 2887, #1 of 4 entries at livecodebenchpro.com. All scores self-reported (unverified); leaderboard is sparse. Not equivalent to main LiveCodeBench (Gemini 3 Pro Preview leads at 91.7% there).
+[^gemini-pricing]: Google AI for Developers, "Gemini Developer API pricing," https://ai.google.dev/gemini-api/docs/pricing (retrieved 2026-04-21) — gemini-3.1-pro-preview: $2.00 / $12.00 per 1M tokens input/output (≤200k context); $4.00 / $18.00 for >200k context. No free-tier API access for Gemini 3.x Pro family.

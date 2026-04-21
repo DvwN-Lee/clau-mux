@@ -39,7 +39,7 @@ zsh -ic "type clmux-codex   2>/dev/null && echo 'codex:available'   || echo 'cod
 [4] 가용한 clmux bridge를 스폰 (개별 명령, -t = team name):
     gemini  → zsh -ic "clmux-gemini -t <team_name>"   # [-m <model>] 등 §8 참조
     codex   → zsh -ic "clmux-codex -t <team_name>"    # [-m <model>] 등 §8 참조
-    copilot → zsh -ic "clmux-copilot -t <team_name>"   # [-m <model>] 등 §8 참조
+    copilot → zsh -ic "clmux-copilot -t <team_name>"   # 기본 모델 (GPT-5.3-Codex) 고정 — -m 금지 (references/clmux-copilot.md §라우팅 모델 정책 참조)
     ※ 3개 모두 필요할 경우 3개를 순차 실행
 [4.5] 검증 (단일 진입점):
     zsh -ic "clmux-teammates"   # 진단 명령 상세는 clmux-tools 참조
@@ -61,11 +61,14 @@ zsh -ic "type clmux-codex   2>/dev/null && echo 'codex:available'   || echo 'cod
 | **Gemini 3.1 Pro** (bridge) | 1M Context, ARC-AGI-2 77.1% | 리서치, Deep analysis + **frame challenger + alt implementation reviewer** |
 | **Gemini 3 Flash** (bridge) | Low latency (TTFT 1.1-1.4s, 172-218 tok/s)[^flash-lat], SWE-bench Verified 78%[^flash-swe] | 빠른 조사, Visual Regression, Grounding |
 | **GPT-5.4 (Codex integrated)** (bridge) | SWE-Bench Pro 57.7%[^codex-pro] \| **별도 제품**: Codex Security (ChatGPT Pro/Enterprise research preview, 2026-03-06) | 구현, 테스트, 보안 검증 + **Evidence Pack 정규화 (구현과 분리)** |
-| **Copilot** (bridge) | GitHub 네이티브, 60M+ 리뷰 | PR ops, CodeQL + **코드/테스트 생성 보조 + GitHub 증거 자동 생성 + 판정 로그 감사** |
+| **Copilot** (bridge) | PR Review @ scale (60M / 2025-04~2026-03, >20% of all GitHub PRs)[^copilot-review], Autofix (CodeQL) 460K alerts/년, time-to-fix −49%[^copilot-autofix], FedRAMP Moderate + US/EU data residency GA 2026-04[^copilot-compliance] | PR ops + Autofix security loop + **코드/테스트 생성 보조 + GitHub 증거 자동 생성 + 판정 로그 감사** |
 
 [^flash-lat]: Artificial Analysis 실측, 2026-04. Flash-Live 음성 전용 변종만 960ms TTFT.
 [^flash-swe]: blog.google/gemini-3-flash 2025-12 발표. 2026-04 기준 Gemini 3.1 Pro 80.6%로 추월됨.
 [^codex-pro]: OpenAI 공식 Standard 설정. Scale AI xHigh 59.1%.
+[^copilot-review]: GitHub Blog "60 million Copilot code reviews and counting" (2026-03-05). 12K+ org 자동 리뷰 활성, 71% actionable / 29% silent, 평균 5.1 comments/review.
+[^copilot-autofix]: GitHub Blog "GitHub expands application security coverage with AI-powered detections" (2026-03-23). 2025 연간 460,258 alert 수정, 1.29h→0.66h (−49%), 170K 내부 테스트 >80% positive feedback. FP rate 미공개.
+[^copilot-compliance]: GitHub Changelog "Copilot data residency in US/EU and FedRAMP compliance now available" (2026-04-13). Japan/AU 로드맵 late 2026. Data-resident endpoint 에 Gemini 는 GCP 인프라 제약으로 제외.
 
 ### 역할 경계 규칙
 

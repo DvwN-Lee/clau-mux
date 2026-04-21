@@ -58,9 +58,9 @@ zsh -ic "type clmux-codex   2>/dev/null && echo 'codex:available'   || echo 'cod
 |---|---|---|
 | **Claude Opus 4.7** (Lead) | 추론 깊이, 시스템 정합성 | Protocol Manager — 문제 정의, rubric, Evidence Pack 판정, 품질 게이트 |
 | **Claude Sonnet 4.6** (native) | 1M Context, TDD, Multi-file Refactoring | 설계/구현/검증 실행 + **secondary critic + rebuttal + long-context code reviewer** |
-| **Gemini 3.1 Pro** (bridge) | 1M Context, ARC-AGI-2 77.1% | 리서치, Deep analysis + **frame challenger + alt implementation reviewer** |
+| **Gemini 3.1 Pro** (bridge) | 1M Context[^gemini-pro-context], ARC-AGI-2 77.1% (ARC Prize Verified)[^gemini-pro-arc], LiveCodeBench Pro Elo 2887 (#1, self-reported)[^gemini-pro-lcb] | 리서치, Deep analysis + **frame challenger + alt implementation reviewer** |
 | **Gemini 3 Flash** (bridge) | Low latency (TTFT 1.1-1.4s, 172-218 tok/s)[^flash-lat], SWE-bench Verified 78%[^flash-swe] | 빠른 조사, Visual Regression, Grounding |
-| **GPT-5.4 (Codex integrated)** (bridge) | SWE-Bench Pro 57.7%[^codex-pro] \| **별도 제품**: Codex Security (ChatGPT Pro/Enterprise research preview, 2026-03-06) | 구현, 테스트, 보안 검증 + **Evidence Pack 정규화 (구현과 분리)** |
+| **GPT-5.4 (Codex integrated)** (bridge) | SWE-Bench Pro 57.7% (OpenAI Standard reasoning)[^codex-pro], Terminal-Bench 2.0 77.3% (GPT-5.3-Codex + Droid)[^codex-terminal-teams] | 구현, 테스트, 코드 리뷰 + **Evidence Pack 정규화 (구현과 분리)**. 본격 보안 스캔은 Plus 티어 미접근 |
 | **Copilot** (bridge) | PR Review @ scale (60M / 2025-04~2026-03, >20% of GitHub PRs, 71% actionable)[^copilot-review], Autofix (CodeQL) on public repos (460K alerts/년, time-to-fix −49%)[^copilot-autofix] | PR ops + Autofix (public repo) + **코드/테스트 생성 보조 + GitHub 증거 자동 생성** |
 
 [^flash-lat]: Artificial Analysis 실측, 2026-04. Flash-Live 음성 전용 변종만 960ms TTFT.
@@ -68,6 +68,10 @@ zsh -ic "type clmux-codex   2>/dev/null && echo 'codex:available'   || echo 'cod
 [^codex-pro]: OpenAI 공식 Standard 설정. Scale AI xHigh 59.1%.
 [^copilot-review]: GitHub Blog "60 million Copilot code reviews and counting" (2026-03-05). 12K+ org 자동 리뷰 활성, 71% actionable / 29% silent, 평균 5.1 comments/review.
 [^copilot-autofix]: GitHub Blog "GitHub expands application security coverage with AI-powered detections" (2026-03-23). 2025 연간 460,258 alert 수정, 1.29h→0.66h (−49%), 170K 내부 테스트 >80% positive feedback. FP rate 미공개.
+[^codex-terminal-teams]: Terminal-Bench 2.0 leaderboard, https://www.tbench.ai/leaderboard/terminal-bench/2.0 (evaluated 2026-02-24). GPT-5.3-Codex + Droid agent: 77.3% ± 2.2. Agent-configuration-dependent.
+[^gemini-pro-context]: DeepMind Model Card, "Gemini 3.1 Pro" (2026-02-19), https://deepmind.google/models/model-cards/gemini-3-1-pro/ — 1M input / 64K output tokens.
+[^gemini-pro-arc]: DeepMind Model Card + Google Blog, "Gemini 3.1 Pro" (2026-02-19) — ARC-AGI-2: 77.1% (ARC Prize Verified); Gemini 3 Pro baseline was ~31%.
+[^gemini-pro-lcb]: DeepMind Model Card — LiveCodeBench Pro Elo 2887, #1 of 4 entries at livecodebenchpro.com. All scores self-reported / unverified; leaderboard is sparse.
 
 ### 역할 경계 규칙
 

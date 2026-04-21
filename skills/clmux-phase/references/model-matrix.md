@@ -10,8 +10,8 @@ Lead/Teammate가 Subagent를 spawn할 때 아래 매트릭스를 참조한다.
 | Anthropic | Claude Sonnet | `anthropic` | 구현 Teammate, secondary critic, rebuttal, long-context reviewer |
 | Anthropic | Claude Haiku | `anthropic` | Subagent (기계적 변환, 추출) |
 | Google | Gemini 3.1 Pro | `google` | 리서치, frame challenger, alt implementation reviewer |
-| Google | Gemini 3.0 Flash | `google` | 빠른 조사, Visual Regression, Grounding |
-| OpenAI | Codex GPT-5.4 | `openai` | 구현, 보안, Evidence Pack 정규화 |
+| Google | Gemini 3 Flash | `google` | 빠른 조사, Visual Regression, Grounding |
+| OpenAI | Codex GPT-5.4 | `openai` | 구현, 코드 리뷰, Evidence Pack 정규화 (본격 보안 스캔은 Codex Security 기능으로 ChatGPT Pro $100+ 티어 한정 — 본 팀 Plus 티어 미접근) |
 | GitHub | Copilot | `github` | PR ops, GitHub 증거 자동 생성, 판정 로그 감사 |
 
 > **provider_family 집계**: 같은 provider_family 내 복수 모델 = 1개 독립 Provider (Rule 3)
@@ -56,7 +56,7 @@ Lead/Teammate가 Subagent를 spawn할 때 아래 매트릭스를 참조한다.
 | V-1 커버리지 수치 확인 | **Haiku** | threshold 비교 |
 | V-1 순환 의존 탐지 (정적) | **Haiku** | 그래프 순회 |
 | V-4 EARS ID 존재 체크 | **Haiku** | 존재 검색 |
-| V-2 보안 (알려진 패턴) | Haiku (주의) | 신규 패턴 미탐지 위험 — Sonnet 검증 병행 권장 |
+| V-2 보안 (알려진 패턴) | Haiku (주의) | 신규 패턴 미탐지 위험 — Sonnet 검증 병행 권장. Deep 취약점 스캔은 Codex Security 필요 (Plus 티어 미접근) |
 | V-4 의미적 대응 | Sonnet | 의미 판단 |
 | 비관적 통합 + 보고서 | Sonnet/Opus | 교차 합성 |
 

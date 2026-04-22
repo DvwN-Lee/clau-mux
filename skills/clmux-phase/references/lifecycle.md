@@ -55,9 +55,11 @@ updated: 2026-03-26T12:00:00
 ---
 | Name | Model | Role | Status |
 |------|-------|------|--------|
-| architect | opus | 설계 | active |
-| dev | sonnet | 구현 | busy:TASK-012 |
+| design-gemini-pro | $CLMUX_GEMINI_MODEL_PRO | 설계+challenger | active |
+| boilerplate-codex | gpt-5.4 | 구현+critic | busy:TASK-012 |
 ```
+
+> **Anthropic teammate 금지**: Teammate(`TeamCreate` 멤버)는 비-Claude provider만(Gemini/Codex/Copilot). Lead와 Subagent에서만 anthropic 사용.
 
 **갱신 시점**: TeamCreate / Teammate spawn·제거 / Phase 전환 / DISPATCH·COMPLETION
 

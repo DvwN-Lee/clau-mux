@@ -10,7 +10,7 @@
 
 ### P3 BUILD — Boilerplate 병렬 + IaC
 
-Codex는 Claude teammate가 핵심 로직을 TDD로 구현하는 동안 **정의된 패턴의 반복 코드를 병렬 생성**한다.
+Codex는 Lead가 spawn한 Subagent(`model="sonnet"`)가 핵심 로직을 TDD로 구현하는 동안 **정의된 패턴의 반복 코드를 병렬 생성**한다.
 
 | 작업 | 구체 내용 |
 |---|---|
@@ -19,11 +19,11 @@ Codex는 Claude teammate가 핵심 로직을 TDD로 구현하는 동안 **정의
 
 **프롬프트 예시:**
 ```
-SendMessage(to: "codex-worker", message:
+SendMessage(to: "boilerplate-codex", message:
   "tasks.md의 T-005~T-008 Boilerplate 작업 병렬 생성.
   각 task의 AC를 충족하는 코드를 생성하고
   결과를 write_to_lead로 전달.
-  Claude가 TDD 검증 후 통합 진행")
+  Lead가 Subagent(`model=\"sonnet\"`) TDD 검증 후 통합 진행")
 ```
 
 ### P4 VERIFY — 보안 스캔 1차 + 성능 분석 1차
@@ -47,7 +47,7 @@ Codex Security의 검증 파이프라인:
 
 **프롬프트 예시:**
 ```
-SendMessage(to: "codex-worker", message:
+SendMessage(to: "security-codex", message:
   "현재 Codebase에 대한 보안 취약점 스캔 진행.
   1. SQL Injection, Command Injection, 인증 결함 순으로 분류
   2. 각 발견 항목에 심각도(CRITICAL/HIGH/MEDIUM) 부여
@@ -64,7 +64,7 @@ SendMessage(to: "codex-worker", message:
 
 **프롬프트 예시:**
 ```
-SendMessage(to: "codex-worker", message:
+SendMessage(to: "perf-codex", message:
   "API Endpoint 전체에 대한 성능 분석 실행.
   1. N+1 쿼리 패턴 탐지
   2. 알고리즘 복잡도 O(n²) 이상 지점 식별
@@ -74,13 +74,13 @@ SendMessage(to: "codex-worker", message:
 
 ### P4 VERIFY — 코드 리뷰 보조
 
-Claude teammate가 V-1~V-4 검증을 수행한 후, Codex가 **보완적 관점에서 리뷰**한다. 다른 학습 데이터와 아키텍처로 Claude가 놓치는 Error Path, Edge Case를 포착한다.
+Lead가 spawn한 검증 Subagent(`model="sonnet"`/`haiku`)가 V-1~V-4 검증을 수행한 후, Codex가 **보완적 관점에서 리뷰**한다. 다른 학습 데이터와 아키텍처로 anthropic이 놓치는 Error Path, Edge Case를 포착한다.
 
 **프롬프트 예시:**
 ```
-SendMessage(to: "codex-worker", message:
+SendMessage(to: "review-codex", message:
   "PR diff를 기반으로 코드 리뷰 진행.
-  Claude 검증에서 놓칠 수 있는 관점에 집중:
+  Lead/Subagent 검증에서 놓칠 수 있는 관점에 집중:
   1. Error path 누락 (예외 미처리, 실패 시 상태 불일치)
   2. Edge case (빈값, null, 경계값, 동시성)
   3. 발견 사항을 write_to_lead로 전달")
@@ -96,7 +96,7 @@ SendMessage(to: "codex-worker", message:
 
 **프롬프트 예시:**
 ```
-SendMessage(to: "codex-worker", message:
+SendMessage(to: "security-codex", message:
   "P4 보안 스캔에서 발견된 CRITICAL 항목 수정 완료.
   1. 수정된 코드에 대해 보안 재스캔 진행
   2. 신규 취약점 없음 확인
@@ -106,7 +106,7 @@ SendMessage(to: "codex-worker", message:
 ## Codex 고유 설정
 
 - **Spawn 명령**: `clmux-codex`
-- **기본 agent 이름**: `codex-worker`
+- **기본 agent 이름**: `codex-worker` (standalone fallback) — clmux-teams 워크플로에서는 task-aware naming 필수 (예: `security-codex`, `boilerplate-codex`, `review-codex`, `perf-codex`). [clmux-teams §Naming Convention](../SKILL.md#naming-convention-필수) 참조
 - **실행 모드**: 기본 launch는 `codex --full-auto`. sandbox 정책은 Codex 실행 환경 설정을 따름
 - **Idle pattern**: `›`
 - **모델 예시**: `gpt-5.4`, `gpt-5.4-mini`

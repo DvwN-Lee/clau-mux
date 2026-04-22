@@ -6,15 +6,16 @@ Lead/Teammate가 Subagent를 spawn할 때 아래 매트릭스를 참조한다.
 
 | Provider | 모델 | provider_family | 핵심 역할 |
 |----------|------|----------------|----------|
-| Anthropic | Claude Opus | `anthropic` | Lead (Protocol Manager), 설계/검증 Teammate |
-| Anthropic | Claude Sonnet | `anthropic` | 구현 Teammate, secondary critic, rebuttal, long-context reviewer |
-| Anthropic | Claude Haiku | `anthropic` | Subagent (기계적 변환, 추출) |
-| Google | Gemini 3.1 Pro | `google` | 리서치, frame challenger, alt implementation reviewer |
-| Google | Gemini 3 Flash | `google` | 빠른 조사, Visual Regression, Grounding |
-| OpenAI | Codex GPT-5.4 | `openai` | 구현, 코드 리뷰, Evidence Pack 정규화 (본격 보안 스캔은 Codex Security 기능으로 ChatGPT Pro $100+ 티어 한정 — 본 팀 Plus 티어 미접근) |
-| GitHub | Copilot | `github` | PR ops, GitHub 증거 자동 생성, 판정 로그 감사 |
+| Anthropic | Claude Opus | `anthropic` | Lead (Protocol Manager) **only** — Teammate 사용 금지 |
+| Anthropic | Claude Sonnet | `anthropic` | Lead Session OR Lead가 spawn하는 Subagent (TDD/구현/리뷰) — **Teammate 사용 금지** |
+| Anthropic | Claude Haiku | `anthropic` | Subagent only (기계적 변환, 추출) — Lead가 spawn |
+| Google | Gemini 3.1 Pro | `google` | Teammate — 리서치, frame challenger, alt implementation reviewer, long-context code reviewer (1M ctx), critic |
+| Google | Gemini 3 Flash | `google` | Teammate — 빠른 조사, Visual Regression, Grounding |
+| OpenAI | Codex GPT-5.4 | `openai` | Teammate — 구현, 코드 리뷰, secondary critic, rebuttal, Evidence Pack 정규화 (본격 보안 스캔은 Codex Security 기능으로 ChatGPT Pro $100+ 티어 한정 — 본 팀 Plus 티어 미접근) |
+| GitHub | Copilot | `github` | Teammate — PR ops, GitHub 증거 자동 생성, 판정 로그 감사 |
 
 > **provider_family 집계**: 같은 provider_family 내 복수 모델 = 1개 독립 Provider (Rule 3)
+> **Anthropic teammate 금지**: TeamCreate 멤버는 비-Claude provider만. Anthropic 의견은 Lead와 Lead가 spawn한 Subagent로만 발생.
 
 ## P1 SPEC
 
@@ -42,8 +43,8 @@ Lead/Teammate가 Subagent를 spawn할 때 아래 매트릭스를 참조한다.
 | 서브태스크 | 모델 | 근거 |
 |-----------|------|------|
 | Grounding: 문서 raw fetch | **Haiku** | 추출만 |
-| Grounding: 컨텍스트 합성 | Sonnet | "어떤 API가 맞는지?" 판단 |
-| TDD [Plan/Red/Green/Refactor] | Sonnet | 엔지니어링 판단 |
+| Grounding: 컨텍스트 합성 | Sonnet | "어떤 API가 맞는지?" 판단 (Lead가 Subagent로 위임) |
+| TDD [Plan/Red/Green/Refactor] | Sonnet | 엔지니어링 판단 (Lead가 Subagent로 위임 — Anthropic teammate 금지) |
 | tasks.md 상태 업데이트 | **Haiku** | 기계적 필드 수정 |
 | dispatch-log 엔트리 추가 | **Haiku** | 구조화된 로그 |
 | mid-phase checkpoint 생성 | **Haiku** | 템플릿 채우기 |

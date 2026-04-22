@@ -176,11 +176,12 @@ Gemini CLI를 Claude Code의 teammate로 연결합니다. `clmux-bridge.zsh`가 
 # 터미널에서 Gemini teammate 시작
 clmux-gemini -t <team_name>
 
-# 특정 모델로 시작
-clmux-gemini -t <team_name> -m gemini-3.1-pro-preview
+# 특정 모델로 시작 (CLMUX_GEMINI_MODEL_PRO / CLMUX_GEMINI_MODEL_FLASH 는
+# clmux.zsh 소스 시 자동 설정되며 설치된 CLI 번들에서 최신 버전을 선택함)
+clmux-gemini -t <team_name> -m $CLMUX_GEMINI_MODEL_PRO
 
 # Claude Code Bash tool에서 실행 시 (non-interactive shell이므로 zsh -ic 필요)
-zsh -ic "clmux-gemini -t <team_name> -m gemini-3-flash-preview"
+zsh -ic "clmux-gemini -t <team_name> -m \$CLMUX_GEMINI_MODEL_FLASH"
 
 # Claude Code 내부에서 메시지 전송
 SendMessage(to: "gemini-worker", message: "...")
@@ -241,7 +242,7 @@ clmux-copilot-stop -t <team_name>
 
 > **참고**: `clmux -c`로 스폰 시 `copilot --yolo` 플래그, `clmux-copilot`으로 스폰 시 `copilot --allow-all-tools` 플래그가 사용됩니다.
 
-> **모델 호환성 (2026-04 기준)**: GitHub이 `gpt-5.1` 계열을 deprecate(2026-04-01)했고, `claude-sonnet-4.5` 도 백엔드 400 에러로 사용 불가 ([copilot-cli#2597](https://github.com/github/copilot-cli/issues/2597)). Copilot 시작 시 `model_not_supported` 에러가 발생하면 `~/.copilot/config.json` 의 `model` 을 `claude-sonnet-4.6`, `gpt-5.3-codex`, 또는 `gemini-3-pro` 등 [지원 모델](https://docs.github.com/en/copilot/reference/ai-models/supported-models) 로 변경하세요.
+> **모델 호환성 (2026-04 기준)**: GitHub이 `gpt-5.1` 계열을 deprecate(2026-04-01)했고, `claude-sonnet-4.5` 도 백엔드 400 에러로 사용 불가 ([copilot-cli#2597](https://github.com/github/copilot-cli/issues/2597)). Copilot 시작 시 `model_not_supported` 에러가 발생하면 `~/.copilot/config.json` 의 `model` 을 `claude-sonnet-4.6`, `gpt-5.3-codex`, 또는 `gemini-3-pro-preview` 등 [지원 모델](https://docs.github.com/en/copilot/reference/ai-models/supported-models) 로 변경하세요.
 
 #### 전체 워크플로우 예시
 
@@ -278,7 +279,7 @@ SendMessage(to: "copilot-worker", message: "...")
 | `clmux-teammates` | 현재 세션의 teammate 목록 (팀별 트리, pane ID, CLI 타입, alive/dead 상태) |
 | `clmux-ls` | 활성 세션 목록 + orphaned 세션 경고 표시 |
 | `clmux-cleanup` | attached 클라이언트 없는 orphaned 세션 일괄 제거 |
-| `clmux-gemini -t <team> [-n <name>] [-x <sec>] [-m <model>]` | Gemini CLI를 teammate로 연결 (예: `-m gemini-3.1-pro-preview`) |
+| `clmux-gemini -t <team> [-n <name>] [-x <sec>] [-m <model>]` | Gemini CLI를 teammate로 연결 (예: `-m $CLMUX_GEMINI_MODEL_PRO`) |
 | `clmux-gemini-stop -t <team> [-n <name>]` | Gemini teammate 종료 |
 | `clmux-codex -t <team> [-n <name>] [-x <sec>] [-m <model>]` | Codex CLI를 teammate로 연결 (예: `-m gpt-5.4`) |
 | `clmux-codex-stop -t <team> [-n <name>]` | Codex teammate 종료 |

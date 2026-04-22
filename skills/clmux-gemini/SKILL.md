@@ -26,6 +26,8 @@ TeamCreate(team_name: "<team_name>")
 
 If TeamCreate returns "Already leading team", that's fine — routing is active.
 
+If you skip this step, `clmux-gemini` will abort with an error: "team '<name>' has no leadSessionId". This is enforced by a guard in `_clmux_spawn_agent`.
+
 ### Step 2: Spawn Gemini pane + bridge
 
 ```bash
@@ -38,7 +40,7 @@ This resets inbox/outbox, spawns Gemini in a tmux pane, starts the bridge proces
 
 Options:
 - `-t <team_name>` — required
-- `-n <agent_name>` — default: `gemini-worker`
+- `-n <agent_name>` — **clmux-teams 워크플로에서 필수 명시** (예: `research-gemini-pro`, `frontend-gemini-flash`). standalone 호출 시 default: `gemini-worker`. Naming Convention 상세는 [clmux-teams §Naming Convention](../clmux-teams/SKILL.md#naming-convention-필수) 참조
 - `-x <timeout>` — idle-wait timeout, default: `30`
 
 ### Step 3: Send initial activation message

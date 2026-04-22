@@ -1,3 +1,30 @@
+# ── _clmux_current_session_id ─────────────────────────────────────────────────
+# Extracts current Claude Code session ID by finding the most recently modified
+# JSONL in the project session dir. Heuristic — Bash tool env does not expose
+# CLAUDE_SESSION_ID. Uses CLAUDE_PROJECT_DIR if set, falls back to PWD.
+# Prints session id on stdout, empty string if not found.
+_clmux_current_session_id() {
+  local base_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+  local proj_key="${base_dir//\//-}"
+  local proj_dir="$HOME/.claude/projects/${proj_key}"
+  [[ -d "$proj_dir" ]] || return 0
+  local latest
+  latest=$(ls -t "$proj_dir"/*.jsonl 2>/dev/null | head -1)
+  [[ -n "$latest" ]] && basename "$latest" .jsonl
+}
+
+# ── _clmux_team_session_id ────────────────────────────────────────────────────
+# Extracts leadSessionId from a team's config.json.
+# Prints value on stdout; empty string if config missing or field absent.
+_clmux_team_session_id() {
+  local cfg="$1/config.json"
+  [[ -f "$cfg" ]] || return 0
+  python3 -c "
+import json, sys
+try: print(json.load(open('$cfg')).get('leadSessionId',''))
+except Exception: pass" 2>/dev/null
+}
+
 # ── _clmux_spawn_agent_in_session ─────────────────────────────────────────────
 # Used by clmux() to spawn a Gemini agent inside an already-created session
 # (outside tmux context — uses tmux send-keys trick is not needed, we just
@@ -139,6 +166,32 @@ _clmux_spawn_agent() {
 
   local team_dir="$HOME/.claude/teams/$team_name"
   [[ ! -d "$team_dir" ]] && { echo "error: team '$team_name' not found at $team_dir" >&2; return 1; }
+
+  # Guard: team must be TeamCreate-registered for Claude Code orchestrator
+  # to push write_to_lead responses as <teammate-message> conversation turns.
+  # Without leadSessionId, bridge spawns successfully but messages are orphaned.
+  local _team_sid _cur_sid
+  _team_sid=$(_clmux_team_session_id "$team_dir")
+  if [[ -z "$_team_sid" ]]; then
+    cat >&2 <<ERREOF
+error: team '$team_name' has no leadSessionId in $team_dir/config.json.
+       Bridge spawn aborted — responses would not reach the Lead session.
+       Run TeamCreate(team_name: "$team_name") in the current Claude Code
+       Lead session, then retry this spawn.
+ERREOF
+    return 1
+  fi
+
+  _cur_sid=$(_clmux_current_session_id)
+  if [[ -n "$_cur_sid" && "$_cur_sid" != "$_team_sid" ]]; then
+    cat >&2 <<WARNEOF
+warning: team '$team_name' leadSessionId ($_team_sid) does not match
+         current session ($_cur_sid). Responses may not reach this Lead.
+         Re-run TeamCreate(team_name: "$team_name") if you want this session
+         to own the team.
+WARNEOF
+    # proceed — user may intentionally reuse across sessions
+  fi
 
   local inbox_dir="$team_dir/inboxes"
   local inbox="$inbox_dir/$agent_name.json"
@@ -301,4 +354,53 @@ _clmux_agent_enabled() {
   local key="${agent:u}_ENABLED"
   local val=$(grep "^${key}=" "$config" 2>/dev/null | cut -d= -f2)
   [[ "$val" != "0" ]]
+}
+
+# ── _clmux_gemini_latest ──────────────────────────────────────────────────────
+# Resolves the highest-versioned Gemini model name for a given tier by parsing
+# the installed Gemini CLI bundle. Results are cached in ~/.cache/clmux/ keyed
+# by CLI version, so re-parsing only happens after a CLI update.
+#
+# Usage: _clmux_gemini_latest <tier>
+#   tier: "pro"   → highest gemini-X.Y-pro-preview
+#         "flash" → highest gemini-X.Y-flash-preview (excludes -lite- variants)
+#         <regex> → raw ERE passed directly for extensibility
+# Returns: model name on stdout; exits 1 if gemini not found or no match.
+_clmux_gemini_latest() {
+  local tier="${1:?_clmux_gemini_latest: tier required (pro|flash|<regex>)}"
+
+  local gemini_bin
+  gemini_bin="$(command -v gemini 2>/dev/null)" || return 1
+  local pkg_dir="${gemini_bin:h:h}/lib/node_modules/@google/gemini-cli"
+  [[ -d "$pkg_dir" ]] || return 1
+
+  local version
+  version="$(grep -m1 '"version"' "$pkg_dir/package.json" 2>/dev/null | grep -o '[0-9][0-9.]*')"
+  [[ -n "$version" ]] || version="unknown"
+
+  local cache_dir="$HOME/.cache/clmux"
+  local cache_file="$cache_dir/gemini-models-${version}.txt"
+
+  if [[ ! -f "$cache_file" ]]; then
+    mkdir -p "$cache_dir"
+    # Extract quoted model-name strings from all bundle JS files, deduplicate.
+    grep -oh '"gemini-[0-9][^"]*"' "$pkg_dir/bundle/"*.js 2>/dev/null \
+      | tr -d '"' \
+      | grep -E '^gemini-[0-9]' \
+      | sort -Vu > "$cache_file"
+    # Remove stale caches from older CLI versions.
+    find "$cache_dir" -name "gemini-models-*.txt" \
+      ! -name "gemini-models-${version}.txt" -delete 2>/dev/null
+  fi
+
+  local pattern
+  case "$tier" in
+    pro)   pattern='^gemini-[0-9][0-9.]*-pro-preview$' ;;
+    flash) pattern='^gemini-[0-9][0-9.]*-flash-preview$' ;;
+    *)     pattern="$tier" ;;
+  esac
+
+  local result
+  result="$(sort -Vr "$cache_file" 2>/dev/null | grep -Em1 "$pattern")"
+  [[ -n "$result" ]] && echo "$result" || return 1
 }

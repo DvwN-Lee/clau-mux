@@ -100,13 +100,15 @@ zsh -ic "clmux-teammates"       # team 멤버 status
 ```
 → raw tmux 0건.
 
-### 시나리오 C: codex-worker가 응답 없음
+### 시나리오 C: security-codex가 응답 없음
 ```
-zsh -ic "clmux-teammates"                                       # alive 확인
-zsh -ic "clmux-pane-info codex-worker -n 30"                    # 최근 출력
-zsh -ic "clmux-teammate-check --team chain-ux --to codex-worker" # ping
+zsh -ic "clmux-teammates"                                          # alive 확인
+zsh -ic "clmux-pane-info security-codex -n 30"                     # 최근 출력
+zsh -ic "clmux-teammate-check --team chain-ux --to security-codex" # ping
 # 이상 시 → clmux-teams §"에러 대응" 으로 teardown + respawn
 ```
+
+> teammate name 형식은 `<task>-<provider>` (clmux-teams §Naming Convention). `codex-worker` 같은 generic name은 standalone fallback 한정.
 
 ## 참조 자료
 

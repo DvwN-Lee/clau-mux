@@ -58,8 +58,8 @@ Copilot Agent Mode (Workspace) 는 Claude 3.7 Sonnet 기반 **SWE-Bench Verified
 **참고** — Copilot 플랫폼이 라우팅 가능한 모델 목록 (본 팀 **사용 금지**):
 - ✅ GPT-5.3-Codex (기본, **본 팀 사용**)
 - ❌ GPT-5.4 (Codex CLI 경유로만)
-- ❌ Claude Sonnet 4.6 (native Claude teammate 경유로만)
-- ❌ Claude Opus 4.6 (Lead 경유로만)
+- ❌ Claude Sonnet 4.6 (Lead/Subagent 경유로만 — Anthropic teammate 금지)
+- ❌ Claude Opus 4.6 (Lead 경유로만 — Anthropic teammate 금지)
 
 **운용 제약**:
 - `clmux-copilot -t <team>` 만 사용, **`-m` 옵션 지정 금지**
@@ -88,11 +88,11 @@ Copilot Agent Mode (Workspace) 는 Claude 3.7 Sonnet 기반 **SWE-Bench Verified
 
 ### P3 BUILD — PR Code Review
 
-Copilot은 P3에서 Claude teammate가 생성한 코드의 **PR 기반 리뷰**를 담당한다. GitHub 네이티브 통합으로 PR 코멘트, 리뷰 요청, 자동 라벨링을 처리한다.
+Copilot은 P3에서 Lead가 spawn한 Subagent(`model="sonnet"`) 또는 Codex가 생성한 코드의 **PR 기반 리뷰**를 담당한다. GitHub 네이티브 통합으로 PR 코멘트, 리뷰 요청, 자동 라벨링을 처리한다.
 
 **프롬프트 예시:**
 ```
-SendMessage(to: "copilot-worker", message:
+SendMessage(to: "pr-review-copilot", message:
   "PR #[번호]에 대한 코드 리뷰 진행.
   1. 변경 파일별 리뷰 코멘트 작성
   2. Approve/Request Changes 판정
@@ -101,11 +101,11 @@ SendMessage(to: "copilot-worker", message:
 
 ### P4 VERIFY — PR 기반 검증 보조
 
-Claude teammate의 V-1~V-4 검증 완료 후, Copilot이 PR 레벨에서 추가 검증을 수행한다.
+Lead/Subagent의 V-1~V-4 검증 완료 후, Copilot이 PR 레벨에서 추가 검증을 수행한다.
 
 **프롬프트 예시:**
 ```
-SendMessage(to: "copilot-worker", message:
+SendMessage(to: "pr-review-copilot", message:
   "PR #[번호]의 검증 결과를 GitHub PR 코멘트로 정리.
   1. verify-report.md의 이슈 목록을 PR 코멘트로 변환
   2. CRITICAL 항목은 Request Changes로 표시
@@ -125,7 +125,7 @@ Copilot은 P5에서 **PR 생성부터 배포 검증까지** GitHub 워크플로 
 
 **프롬프트 예시 (PR 생성):**
 ```
-SendMessage(to: "copilot-worker", message:
+SendMessage(to: "pr-ops-copilot", message:
   "현재 브랜치의 변경사항으로 PR 생성.
   1. 변경 파일 목록 + 핵심 변경 요약
   2. 리뷰어 지정: [reviewer]
@@ -134,7 +134,7 @@ SendMessage(to: "copilot-worker", message:
 
 **프롬프트 예시 (Smoke Test):**
 ```
-SendMessage(to: "copilot-worker", message:
+SendMessage(to: "pr-ops-copilot", message:
   "배포 후 Smoke Test 실행.
   1. Health Check Endpoint 응답 확인
   2. 핵심 기능 Endpoint 3개 정상 응답 확인
@@ -144,7 +144,7 @@ SendMessage(to: "copilot-worker", message:
 ## Copilot 고유 설정
 
 - **Spawn 명령**: `clmux-copilot`
-- **기본 agent 이름**: `copilot-worker`
+- **기본 agent 이름**: `copilot-worker` (standalone fallback) — clmux-teams 워크플로에서는 task-aware naming 필수 (예: `pr-review-copilot`, `pr-ops-copilot`, `audit-copilot`). [clmux-teams §Naming Convention](../SKILL.md#naming-convention-필수) 참조
 - **실행 모드**: `copilot --allow-all-tools`
 - **Idle pattern**: `/ commands`
 - **모델**: `GPT-5.3-Codex` (Copilot CLI 기본, 본 팀 정책상 **고정** — `-m` 지정 금지. 상세: §라우팅 모델 정책)

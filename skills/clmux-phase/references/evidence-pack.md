@@ -132,15 +132,16 @@ Lead가 작업 수신 시 리스크 레벨을 먼저 판정한다. 판정 기준
 
 ## provider_family 집계 규칙
 
-| provider_family | 소속 모델 | 독립 Provider 수 |
-|---|---|---|
-| `anthropic` | Claude Opus, Claude Sonnet, Claude Haiku | 1 |
-| `google` | Gemini 3.1 Pro, Gemini 3.0 Flash | 1 |
-| `openai` | Codex GPT-5.4 | 1 |
-| `github` | Copilot | 1 |
+| provider_family | 소속 모델 | 독립 Provider 수 | 발생 위치 |
+|---|---|---|---|
+| `anthropic` | Claude Opus, Claude Sonnet, Claude Haiku | 1 | **Lead와 Lead spawn Subagent only** (Teammate 금지) |
+| `google` | Gemini 3.1 Pro, Gemini 3.0 Flash | 1 | Teammate (bridge) |
+| `openai` | Codex GPT-5.4 | 1 | Teammate (bridge) |
+| `github` | Copilot | 1 | Teammate (bridge) |
 
 - 같은 provider_family 내 복수 모델의 동의 = **1개 Provider 지지** (2개가 아님)
 - Rule 3: anthropic 외 최소 1개 provider_family 독립 지지 + 교차 검증 증거 필수
+- **Anthropic teammate 금지** 정책으로 anthropic 의견은 Lead 단일 출처 — VETO 투표는 비-Claude teammate만 수행 (clmux-veto §clmux teammate VETO 참여)
 
 ---
 

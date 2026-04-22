@@ -107,7 +107,7 @@ Agent(model="sonnet", prompt="[코드 리뷰]")     # 판단 → Sonnet
 [2] 역할 분석 → 팀 규모 결정 (§팀 규모 결정)
 [3] 리스크 레벨 판정 (High/Medium/Low → 프로토콜 차등)
 [4] clmux teammates 가용 시 → Skill("clmux:clmux-teams") invoke
-    clmux 미가용 시 → Claude Code native teammate만으로 구성
+    clmux 미가용 시 → Lead + Subagent only로 구성 (TeamCreate 없이 진행 가능, Cross-Provider 합의 불가 → 판정 로그에 "anthropic 단독 운영" 명시)
 [5] Agent(name="{역할}", team_name="clmux-{project}", model="{opus|sonnet}", prompt="...")
 [6] Phase 진행: TaskCreate → DISPATCH → Evidence Pack → VETO → Gate → 다음 Phase
 ```
@@ -149,12 +149,15 @@ Opus: 시스템 정합성, VETO, 적대적 관점
 | 역할 유형 | 모델 |
 |---------|------|
 | Lead Session (Protocol Manager) | **Sonnet 이상** |
-| 설계/검증 Teammate | **Opus** (Cross-Provider 팀에서 Sonnet 겸임 가능) |
-| 구현/빌드 Teammate | **Sonnet** |
-| Secondary critic / Rebuttal | **Sonnet** |
+| 설계/검증 Teammate | **Gemini 3.1 Pro** (bridge) — Anthropic teammate 금지 |
+| 구현/빌드 Teammate | **Codex GPT-5.4** (bridge) — 또는 Lead가 Subagent(`model="sonnet"`)로 위임 |
+| Secondary critic / Rebuttal | **Codex** 또는 **Gemini 3.1 Pro** (bridge) |
 | Frame challenger | **Gemini 3.1 Pro** (bridge) |
-| Subagent (읽기 전용/추출/기계적 변환) | **Haiku** |
-| Subagent (코드 구현) | **Sonnet** |
+| Long-context code reviewer (1M ctx) | **Gemini 3.1 Pro** (bridge) |
+| Subagent (읽기 전용/추출/기계적 변환) | **Haiku** — Lead가 직접 spawn |
+| Subagent (코드 구현/TDD) | **Sonnet** — Lead가 직접 spawn |
+
+> **Anthropic teammate 금지**: TeamCreate 멤버는 비-Claude provider만(Gemini/Codex/Copilot). Anthropic 모델은 Lead와 Subagent에서만 사용.
 
 > **Haiku Lead 제약**: Haiku는 Lead 모델로 사용 불가 — VETO 중재, 헌법 기반 의사결정 불가.
 
@@ -175,22 +178,25 @@ Opus: 시스템 정합성, VETO, 적대적 관점
 
 ### Lead = Sonnet인 경우의 역할 보완
 
-Lead가 Sonnet일 때 검증 역할 Teammate(Opus)가 검증 가능성 관점으로
-요구사항 누락·Spec drift 리스크를 독립 검토한다. 검증 역할 본연의
+Lead가 Sonnet일 때 Lead가 검증 Subagent(`model="sonnet"`)를 별도 spawn하여
+요구사항 누락·Spec drift 리스크를 독립 검토한다. 본 검증 Subagent는
 검증 관점을 유지하며, 설계 역할 전문 영역인 EARS 완결성·아키텍처
-검토는 포함하지 않는다.
+검토는 비-Claude teammate(Gemini Pro 등)에 위임한다.
 
 Phase별 서브태스크 모델 매트릭스는 [model-matrix.md](references/model-matrix.md) 참조.
 
-## 2-Tier 위임 구조
+## 위임 구조 (Lead 직접 spawn + Bridge Teammate)
 
 ```
-Lead (사용자 세션 모델, Sonnet 이상) → Teammate (Opus/Sonnet/Bridge) → Subagent (Sonnet/Haiku, model 명시 필수)
+Lead (사용자 세션 모델, Sonnet 이상)
+  ├── Subagent (Sonnet/Haiku, model 명시 필수) — Lead가 직접 spawn (위임 게이트키퍼)
+  └── Teammate (clmux bridge only — Gemini/Codex/Copilot)
 ```
 
-> **Lead는 Subagent를 직접 spawn하여 코드를 작성하지 않는다.** Lead의 역할은 문제 정의, rubric, Evidence Pack 판정, 게이트 관리에 한정된다 (Rule 1).
+> **Lead는 Subagent 위임 게이트키퍼다.** 코드 작성·TDD 루프·파일 수정은 Lead가 직접 하지 않고 `Agent(model="sonnet"|"haiku")` Subagent로 위임한다. Lead의 역할은 문제 정의, rubric, Evidence Pack 판정, 게이트 관리, **Subagent 위임**에 한정된다 (Rule 1 일부 재정의: 직접 작성 금지는 유지하되 직접 위임은 허용).
+> **Anthropic teammate 금지**: `TeamCreate` 멤버는 비-Claude provider(Gemini/Codex/Copilot)만. Anthropic 모델은 Lead와 Subagent에서만 사용.
 
-### Teammate → Subagent 위임 규칙
+### Lead/Teammate → Subagent 위임 규칙
 
 | 조건 | 행동 |
 |------|------|

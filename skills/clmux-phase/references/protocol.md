@@ -274,6 +274,6 @@ criteria:
 
 | 항목 | 전환 방식 |
 |------|----------|
-| requirements.md 승인 (P1→P2) | VETO Unanimity 통과 + Analyst 독립 검증 VETO 0건 = 자동 Gate + async 통보 (Analyst 독립 검증은 Lead=Sonnet 시에만 활성화) |
+| requirements.md 승인 (P1→P2) | VETO Unanimity 통과 + 검증 Subagent 독립 검증 VETO 0건 = 자동 Gate + async 통보 (검증 Subagent 독립 검증은 Lead=Sonnet 시에만 활성화 — Lead가 `Agent(model="sonnet")`로 별도 spawn) |
 | Gate 미충족 롤백 | 자동 롤백 + gate checkpoint 기록 + async 통보 |
 | CLAUDE.md 패턴 승격 | PR 초안 자동 생성 + 통보 |

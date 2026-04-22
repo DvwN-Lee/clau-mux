@@ -1,7 +1,6 @@
 ---
 name: clmux-copilot
 description: This skill should be used when the user asks to "attach copilot as teammate", "add copilot to team", "run clmux-copilot", "start copilot worker", "spawn copilot pane", "clmux-copilot 실행", "copilot teammate 붙여줘", or wants to stop/teardown the Copilot teammate with "clmux-copilot-stop", "stop copilot worker", "copilot 종료", "remove copilot pane".
-version: 0.1.0
 ---
 
 # clmux-copilot

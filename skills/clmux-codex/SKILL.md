@@ -1,7 +1,6 @@
 ---
 name: clmux-codex
 description: This skill should be used when the user asks to "attach codex as teammate", "add codex to team", "run clmux-codex", "start codex worker", "spawn codex pane", "clmux-codex 실행", "codex teammate 붙여줘", or wants to stop/teardown the Codex teammate with "clmux-codex-stop", "stop codex worker", "codex 종료", "remove codex pane".
-version: 0.1.0
 ---
 
 # clmux-codex

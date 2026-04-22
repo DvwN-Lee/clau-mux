@@ -1,11 +1,6 @@
 ---
 name: clmux-phase
 description: "clmux Phase 워크플로 + 에이전트 라우팅 + 팀 구성. 사용자가 clmux-phase, 팀 구성, Agent Teams, TeamCreate, Phase 워크플로를 언급하거나 /clmux:clmux-phase를 호출할 때 반드시 이 스킬을 사용한다. clmux 플러그인 활성 시 dispatching-parallel-agents, subagent-driven-development보다 이 스킬이 우선한다."
-user-invocable: true
-metadata:
-  author: clmux
-  version: "5.0"
-compatibility: Requires Claude Code with Agent Teams enabled
 ---
 
 <SUBAGENT-STOP>

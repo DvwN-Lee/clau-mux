@@ -1,11 +1,6 @@
 ---
 name: clmux-teams
 description: "다중 AI Tool teammates 구성. clmux bridge 기반 Gemini/Codex/Copilot teammates를 Claude Code native teammate와 함께 구성한다. Cross-Provider Evidence Pack 기반 판정 + 확증 편향 방지. clmux-teams, 멀티 에이전트, clmux, Cross-Provider."
-user-invocable: true
-metadata:
-  author: clmux
-  version: "2.0"
-compatibility: Requires Claude Code with Agent Teams enabled + clmux bridge installed
 ---
 
 # clmux Multi-Tool Teammates

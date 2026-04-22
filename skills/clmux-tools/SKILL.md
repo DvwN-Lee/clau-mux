@@ -1,11 +1,6 @@
 ---
 name: clmux-tools
 description: "clmux 단일 진입점 진단 도구 모음 (6 wrappers) + 사용 패턴 (Recipes) + Anti-Pattern + Decision Tree. tmux/cat/json 직접 호출 대신 본 skill 의 명령을 사용한다. 사용자가 pane / session / team 상태 조회 / 메시지 송부 / 활성 세션 목록 / teammate liveness / 디버깅을 언급하거나 /clmux:clmux-tools를 호출할 때 본 skill 사용."
-user-invocable: true
-metadata:
-  author: clmux
-  version: "1.0"
-compatibility: Requires clau-mux clmux.zsh sourced (~/.zshrc)
 ---
 
 # clmux Tools — 진단 + 송수신 단일 진입점

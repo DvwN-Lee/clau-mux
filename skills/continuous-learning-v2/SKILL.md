@@ -2,9 +2,6 @@
 name: continuous-learning-v2
 description: "Hook-driven background system that captures Claude Code tool-use events and analyzes them to detect behavioral patterns, then persists those patterns as instincts. Activates automatically via PreToolUse/PostToolUse hooks — not invoked by user commands."
 user-invocable: false
-metadata:
-  author: clmux
-  version: "2.0"
 ---
 
 # continuous-learning-v2

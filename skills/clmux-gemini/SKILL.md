@@ -1,7 +1,6 @@
 ---
 name: clmux-gemini
 description: This skill should be used when the user asks to "attach gemini as teammate", "add gemini to team", "run clmux-gemini", "start gemini worker", "spawn gemini pane", "clmux-gemini 실행", "gemini teammate 붙여줘", or wants to stop/teardown the Gemini teammate with "clmux-gemini-stop", "stop gemini worker", "gemini 종료", "remove gemini pane".
-version: 0.6.0
 ---
 
 # clmux-gemini

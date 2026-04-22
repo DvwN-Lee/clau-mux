@@ -1,11 +1,6 @@
 ---
 name: clmux-veto
 description: "clmux VETO 합의 프로토콜 (Cross-Provider 합의). Phase별 합의 기준(Unanimity/Supermajority/Pessimistic Consolidation), Evidence Pack 기반 투표, provider_family 집계, Kill-switch 예외, Generator-Validator 분리. 사용자가 VETO, 합의 프로토콜, Kill-switch를 언급하거나 /clmux:clmux-veto를 호출할 때 사용한다."
-user-invocable: true
-metadata:
-  author: clmux
-  version: "1.0"
-compatibility: Requires Claude Code with Agent Teams enabled
 ---
 
 # clmux VETO 프로토콜 (Cross-Provider 합의)

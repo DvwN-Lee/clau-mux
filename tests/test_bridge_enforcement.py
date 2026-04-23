@@ -122,9 +122,13 @@ def test_codex_setup_per_home_writes_isolated_config(tmp_path):
     assert "[mcp_servers.clau_mux_bridge]" in content
     assert str(outbox) in content
     assert "security-codex" in content
-    assert 'approval_mode = "auto"' in content, (
-        "approval_mode must be 'auto' (auto-approve). 'approve' hangs on human input; "
-        "the live bug we are fixing"
+    assert 'approval_mode = "approve"' in content, (
+        "per-tool approval_mode must be 'approve' — schema says this means "
+        "'automatically approve tool execution without user intervention'. Verified "
+        "live in bridge-xcheck team 2026-04-23: simple write_to_lead payloads are "
+        "auto-approved under 'approve'. (Diag: the value 'auto' in Codex 0.123.0 "
+        "prompts every time; the earlier diag-codex hang under 'approve' was a "
+        "content-triggered review on a large/encrypted payload, not a config issue.)"
     )
 
     global_toml = home_root / ".codex" / "config.toml"

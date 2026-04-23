@@ -85,11 +85,11 @@ The user-facing requirement:
 - **Verifies**: concurrent teams have isolated configs; no global block to overwrite.
 
 **C4. Codex `approval_mode` correction**
-- Modify `scripts/setup_codex_mcp.py` line 122: `approval_mode = "approve"` → `approval_mode = "auto"`.
-- **Rationale**: live reproduction confirmed `approve` requires interactive approval; `auto` in the Codex TOML schema means auto-approve. A contradictory self-report from a Codex teammate ("approve = auto-approve") is rejected based on live evidence.
-- **Interface**: none (internal config).
-- **Depends on**: C3 (config is written per-team now, so the change applies cleanly).
-- **Verifies**: Codex worker `write_to_lead` calls complete without hanging.
+- Keep `approval_mode = "approve"` — the earlier plan to switch to `"auto"` was incorrect.
+- **Rationale** (revised after cross-check 2026-04-23): Live ground-truth test in bridge-xcheck team with verify5-codex confirmed that `approval_mode = "approve"` auto-approves simple `write_to_lead` payloads without prompting. The earlier diag-codex hang was content-triggered (Codex's content-safety layer flagged a specific payload containing "encrypted reasoning blob" / "sensitive operational claims"), NOT driven by `approval_mode`. Testing `approval_mode = "auto"` showed the OPPOSITE: it prompts every call. Codex CLI 0.123.0 schema documents `approve = automatically approve without user intervention`, `auto = system decides based on safety rules, likely prompts`, `prompt = always ask`.
+- **Interface**: none.
+- **Depends on**: C3.
+- **Verifies**: Codex worker `write_to_lead` completes without hang for typical payloads (live-verified 2026-04-23). Edge case: very large/sensitive payloads may still trigger Codex's content-review UI — orthogonal to our config and not addressable at the approval_mode layer.
 
 **C5. Prompt `write_to_lead` availability gate**
 - Modify `prompt/GEMINI.md`, `prompt/AGENTS.md`, `prompt/COPILOT.md`:

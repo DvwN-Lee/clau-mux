@@ -116,7 +116,7 @@ PATH = "{path_env}"
 HOME = "{home}"
 
 {TOOL_SECTION}
-approval_mode = "auto\""""
+approval_mode = "approve\""""
     return block
 
 

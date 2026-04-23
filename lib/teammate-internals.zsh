@@ -67,13 +67,19 @@ _clmux_spawn_agent_in_session() {
   if [[ "${cli_cmd%% *}" == "codex" ]]; then
     local codex_home="$team_dir/.codex-home"
     mkdir -p "$codex_home"
+    # Whitelist symlinks: only auth-related state is shared with the global
+    # ~/.codex. History, sessions, logs, sqlite, memories, cache are NOT
+    # symlinked — per-team workers get their own. This prevents cross-team
+    # state bleed and sqlite WAL contention that would otherwise happen when
+    # multiple codex workers in different teams write through the same
+    # symlinked history.jsonl / logs_*.sqlite (Codex 0.123.0).
     if [[ -d "$HOME/.codex" ]]; then
-      for _item in "$HOME/.codex"/*(N) "$HOME/.codex"/.*(N); do
-        local _name="${_item##*/}"
-        [[ "$_name" == "." || "$_name" == ".." ]] && continue
-        [[ "$_name" == "config.toml" ]] && continue
+      local _auth_items=(auth.json credentials.json installation_id .personality_migration models_cache.json instructions.md rules memories)
+      for _name in $_auth_items; do
+        local _src="$HOME/.codex/$_name"
+        [[ -e "$_src" ]] || continue
         [[ -e "$codex_home/$_name" || -L "$codex_home/$_name" ]] && continue
-        ln -s "$_item" "$codex_home/$_name"
+        ln -s "$_src" "$codex_home/$_name"
       done
     fi
     python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
@@ -244,13 +250,19 @@ WARNEOF
   if [[ "${cli_cmd%% *}" == "codex" ]]; then
     local codex_home="$team_dir/.codex-home"
     mkdir -p "$codex_home"
+    # Whitelist symlinks: only auth-related state is shared with the global
+    # ~/.codex. History, sessions, logs, sqlite, memories, cache are NOT
+    # symlinked — per-team workers get their own. This prevents cross-team
+    # state bleed and sqlite WAL contention that would otherwise happen when
+    # multiple codex workers in different teams write through the same
+    # symlinked history.jsonl / logs_*.sqlite (Codex 0.123.0).
     if [[ -d "$HOME/.codex" ]]; then
-      for _item in "$HOME/.codex"/*(N) "$HOME/.codex"/.*(N); do
-        local _name="${_item##*/}"
-        [[ "$_name" == "." || "$_name" == ".." ]] && continue
-        [[ "$_name" == "config.toml" ]] && continue
+      local _auth_items=(auth.json credentials.json installation_id .personality_migration models_cache.json instructions.md rules memories)
+      for _name in $_auth_items; do
+        local _src="$HOME/.codex/$_name"
+        [[ -e "$_src" ]] || continue
         [[ -e "$codex_home/$_name" || -L "$codex_home/$_name" ]] && continue
-        ln -s "$_item" "$codex_home/$_name"
+        ln -s "$_src" "$codex_home/$_name"
       done
     fi
     python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \

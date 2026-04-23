@@ -69,8 +69,9 @@ clmux() {
     fi
     if [[ "$codex_flag" -eq 1 ]] && _clmux_agent_enabled codex; then
       _clmux_ensure_team "$_team_dir" "$_team"
-      python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
-        --outbox "$_team_dir/inboxes/team-lead.json" --agent codex-worker &>/dev/null
+      # setup_codex_mcp.py is now called by _clmux_spawn_agent with the
+      # required --home <team-dir>/.codex-home; calling it here without
+      # --home would exit(2) under the new per-team isolation model.
       _clmux_spawn_agent "codex -a never" codex-worker "^[[:space:]]*›" paste 1 colour36 0 -t "$_team"
     fi
     if [[ "$copilot_flag" -eq 1 ]] && _clmux_agent_enabled copilot; then
@@ -174,8 +175,9 @@ clmux() {
     _clmux_ensure_team "$_st_dir" "$_st_team"
     [[ ! -f "$_st_inbox_dir/codex-worker.json" ]] && echo '[]' > "$_st_inbox_dir/codex-worker.json"
     [[ ! -f "$_st_inbox_dir/team-lead.json" ]]    && echo '[]' > "$_st_inbox_dir/team-lead.json"
-    python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
-      --outbox "$_st_inbox_dir/team-lead.json" --agent codex-worker &>/dev/null
+    # setup_codex_mcp.py is now called by _clmux_spawn_agent_in_session with
+    # the required --home <team-dir>/.codex-home; calling it here without
+    # --home would exit(2) under the new per-team isolation model.
     _clmux_spawn_agent_in_session "$session_name" "codex -a never" codex-worker "^[[:space:]]*›" paste 1 colour36 0 "$_st_team"
   fi
 

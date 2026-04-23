@@ -61,18 +61,16 @@ _clmux_spawn_agent_in_session() {
   local lead_pane
   lead_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | head -1)
 
-  # Codex: per-team CODEX_HOME + symlinked auth state. Mirrors the isolation
-  # done in _clmux_spawn_agent.
+  # Codex: per-team CODEX_HOME + whitelisted auth symlinks. Mirrors
+  # _clmux_spawn_agent exactly, including trust-before-setup ordering
+  # (see that function for the detailed rationale).
   local extra_env=""
   if [[ "${cli_cmd%% *}" == "codex" ]]; then
+    local _lead_cwd
+    _lead_cwd=$(tmux display-message -t "$lead_pane" -p '#{pane_current_path}' 2>/dev/null)
+    [[ -n "$_lead_cwd" ]] && python3 "$CLMUX_DIR/scripts/trust_codex_project.py" "$_lead_cwd" 2>/dev/null
     local codex_home="$team_dir/.codex-home"
     mkdir -p "$codex_home"
-    # Whitelist symlinks: only auth-related state is shared with the global
-    # ~/.codex. History, sessions, logs, sqlite, memories, cache are NOT
-    # symlinked — per-team workers get their own. This prevents cross-team
-    # state bleed and sqlite WAL contention that would otherwise happen when
-    # multiple codex workers in different teams write through the same
-    # symlinked history.jsonl / logs_*.sqlite (Codex 0.123.0).
     if [[ -d "$HOME/.codex" ]]; then
       local _auth_items=(auth.json credentials.json installation_id .personality_migration models_cache.json instructions.md rules memories)
       for _name in $_auth_items; do
@@ -241,21 +239,21 @@ WARNEOF
   _lead_cwd=$(tmux display-message -t "$lead_pane" -p '#{pane_current_path}' 2>/dev/null)
 
   # Codex: per-team isolation via CODEX_HOME. config.toml is written fresh
-  # for this team; all other state (auth.json, credentials, projects trust
-  # store, history, state.db) is symlinked from the user's ~/.codex so the
-  # worker inherits the user's OAuth/API-key login instead of prompting.
-  # Without this, CODEX_HOME points at an empty dir and codex shows the
-  # "Sign in with ChatGPT" screen.
+  # for this team; only auth-related state from ~/.codex is symlinked so the
+  # worker inherits OAuth/API-key login. History, sessions, logs, sqlite,
+  # skills, cache are NOT shared — each team gets its own to avoid cross-
+  # team bleed and sqlite WAL contention under parallel workers.
+  #
+  # Ordering matters: trust_codex_project.py MUST run before setup_codex_mcp.py
+  # because setup seeds the per-team config.toml from the user's global
+  # ~/.codex/config.toml, and the trust entry for $_lead_cwd is written INTO
+  # that global config. If seeding runs first, the per-team config would lack
+  # the trust entry and codex would hang on the "trust this directory?" prompt.
   local extra_env=""
   if [[ "${cli_cmd%% *}" == "codex" ]]; then
+    [[ -n "$_lead_cwd" ]] && python3 "$CLMUX_DIR/scripts/trust_codex_project.py" "$_lead_cwd" 2>/dev/null
     local codex_home="$team_dir/.codex-home"
     mkdir -p "$codex_home"
-    # Whitelist symlinks: only auth-related state is shared with the global
-    # ~/.codex. History, sessions, logs, sqlite, memories, cache are NOT
-    # symlinked — per-team workers get their own. This prevents cross-team
-    # state bleed and sqlite WAL contention that would otherwise happen when
-    # multiple codex workers in different teams write through the same
-    # symlinked history.jsonl / logs_*.sqlite (Codex 0.123.0).
     if [[ -d "$HOME/.codex" ]]; then
       local _auth_items=(auth.json credentials.json installation_id .personality_migration models_cache.json instructions.md rules memories)
       for _name in $_auth_items; do
@@ -268,7 +266,6 @@ WARNEOF
     python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
       --home "$codex_home" --outbox "$outbox" --agent "$agent_name" &>/dev/null
     extra_env="CODEX_HOME=$codex_home "
-    [[ -n "$_lead_cwd" ]] && python3 "$CLMUX_DIR/scripts/trust_codex_project.py" "$_lead_cwd" 2>/dev/null
   elif [[ "${cli_cmd%% *}" == "gemini" ]]; then
     [[ -n "$_lead_cwd" ]] && python3 "$CLMUX_DIR/scripts/trust_gemini_project.py" "$_lead_cwd" 2>/dev/null
   elif [[ "${cli_cmd%% *}" == "copilot" ]]; then

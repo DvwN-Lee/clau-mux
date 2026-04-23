@@ -77,7 +77,8 @@ _clmux_spawn_agent_in_session() {
         local _src="$HOME/.codex/$_name"
         [[ -e "$_src" ]] || continue
         [[ -e "$codex_home/$_name" || -L "$codex_home/$_name" ]] && continue
-        ln -s "$_src" "$codex_home/$_name"
+        # -f: race-safe under concurrent same-team spawns (TOCTOU otherwise).
+        ln -sf "$_src" "$codex_home/$_name" 2>/dev/null
       done
     fi
     python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
@@ -260,7 +261,8 @@ WARNEOF
         local _src="$HOME/.codex/$_name"
         [[ -e "$_src" ]] || continue
         [[ -e "$codex_home/$_name" || -L "$codex_home/$_name" ]] && continue
-        ln -s "$_src" "$codex_home/$_name"
+        # -f: race-safe under concurrent same-team spawns (TOCTOU otherwise).
+        ln -sf "$_src" "$codex_home/$_name" 2>/dev/null
       done
     fi
     python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \

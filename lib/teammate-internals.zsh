@@ -61,17 +61,37 @@ _clmux_spawn_agent_in_session() {
   local lead_pane
   lead_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | head -1)
 
+  # Codex: per-team CODEX_HOME + symlinked auth state. Mirrors the isolation
+  # done in _clmux_spawn_agent.
+  local extra_env=""
+  if [[ "${cli_cmd%% *}" == "codex" ]]; then
+    local codex_home="$team_dir/.codex-home"
+    mkdir -p "$codex_home"
+    if [[ -d "$HOME/.codex" ]]; then
+      for _item in "$HOME/.codex"/*(N) "$HOME/.codex"/.*(N); do
+        local _name="${_item##*/}"
+        [[ "$_name" == "." || "$_name" == ".." ]] && continue
+        [[ "$_name" == "config.toml" ]] && continue
+        [[ -e "$codex_home/$_name" || -L "$codex_home/$_name" ]] && continue
+        ln -s "$_item" "$codex_home/$_name"
+      done
+    fi
+    python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
+      --home "$codex_home" --outbox "$outbox" --agent "$agent_name" &>/dev/null
+    extra_env="CODEX_HOME=$codex_home "
+  fi
+
   local pane_count
   pane_count=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | wc -l | tr -d ' ')
 
   local agent_pane
   if (( pane_count <= 1 )); then
-    agent_pane=$(tmux split-window -t "$lead_pane" -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
+    agent_pane=$(tmux split-window -t "$lead_pane" -h -P -F '#{pane_id}' "exec env ${extra_env}CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
     tmux resize-pane -t "$agent_pane" -x 70%
   else
     local last_pane
     last_pane=$(tmux list-panes -t "=$session_name" -F '#{pane_id}' | grep -v "^${lead_pane}$" | tail -1)
-    agent_pane=$(tmux split-window -t "$last_pane" -v -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
+    agent_pane=$(tmux split-window -t "$last_pane" -v -P -F '#{pane_id}' "exec env ${extra_env}CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
 
     local teammate_panes
     teammate_panes=($(tmux list-panes -t "=$session_name" -F '#{pane_id}' | grep -v "^${lead_pane}$"))
@@ -214,9 +234,28 @@ WARNEOF
   local _lead_cwd
   _lead_cwd=$(tmux display-message -t "$lead_pane" -p '#{pane_current_path}' 2>/dev/null)
 
-  # Codex: update config.toml BEFORE pane spawn (env_clear() strips PATH/HOME)
+  # Codex: per-team isolation via CODEX_HOME. config.toml is written fresh
+  # for this team; all other state (auth.json, credentials, projects trust
+  # store, history, state.db) is symlinked from the user's ~/.codex so the
+  # worker inherits the user's OAuth/API-key login instead of prompting.
+  # Without this, CODEX_HOME points at an empty dir and codex shows the
+  # "Sign in with ChatGPT" screen.
+  local extra_env=""
   if [[ "${cli_cmd%% *}" == "codex" ]]; then
-    python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" --outbox "$outbox" --agent "$agent_name" &>/dev/null
+    local codex_home="$team_dir/.codex-home"
+    mkdir -p "$codex_home"
+    if [[ -d "$HOME/.codex" ]]; then
+      for _item in "$HOME/.codex"/*(N) "$HOME/.codex"/.*(N); do
+        local _name="${_item##*/}"
+        [[ "$_name" == "." || "$_name" == ".." ]] && continue
+        [[ "$_name" == "config.toml" ]] && continue
+        [[ -e "$codex_home/$_name" || -L "$codex_home/$_name" ]] && continue
+        ln -s "$_item" "$codex_home/$_name"
+      done
+    fi
+    python3 "$CLMUX_DIR/scripts/setup_codex_mcp.py" \
+      --home "$codex_home" --outbox "$outbox" --agent "$agent_name" &>/dev/null
+    extra_env="CODEX_HOME=$codex_home "
     [[ -n "$_lead_cwd" ]] && python3 "$CLMUX_DIR/scripts/trust_codex_project.py" "$_lead_cwd" 2>/dev/null
   elif [[ "${cli_cmd%% *}" == "gemini" ]]; then
     [[ -n "$_lead_cwd" ]] && python3 "$CLMUX_DIR/scripts/trust_gemini_project.py" "$_lead_cwd" 2>/dev/null
@@ -229,12 +268,12 @@ WARNEOF
 
   local agent_pane
   if (( pane_count <= 1 )); then
-    agent_pane=$(tmux split-window -t "$lead_pane" -h -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
+    agent_pane=$(tmux split-window -t "$lead_pane" -h -P -F '#{pane_id}' "exec env ${extra_env}CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
     tmux resize-pane -t "$agent_pane" -x 70%
   else
     local last_teammate
     last_teammate=$(tmux list-panes -F '#{pane_id}' | grep -v "^${lead_pane}$" | tail -1)
-    agent_pane=$(tmux split-window -t "$last_teammate" -v -P -F '#{pane_id}' "exec env CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
+    agent_pane=$(tmux split-window -t "$last_teammate" -v -P -F '#{pane_id}' "exec env ${extra_env}CLMUX_OUTBOX=$outbox CLMUX_AGENT=$agent_name $cli_cmd")
 
     local teammate_panes
     teammate_panes=($(tmux list-panes -F '#{pane_id}' | grep -v "^${lead_pane}$"))

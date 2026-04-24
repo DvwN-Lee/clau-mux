@@ -6,6 +6,16 @@
 - **비용**: 본 팀은 Gemini AI Pro 구독 ($20/mo) 사용. Gemini CLI 는 API key 경유 접근 시 pay-per-token 별도 과금 — gemini-3.1-pro-preview $2 / $12 per M tokens (≤200k context), $4 / $18 (>200k)[^gemini-pricing]
 - **적합 영역**: 리서치, 문서 분석, Frontend/UI 구현, Visual Regression, API Spec 생성
 
+> ⚠️ **Foot-gun: 모델 지정 시 literal alias 금지**
+>
+> `clmux-gemini -m gemini-pro` 같은 literal alias는 Gemini CLI가 silent fallback하여 default 모델(`auto-gemini-3` 등)로 로딩된다 — 에러 없이 의도한 모델이 안 뜸.
+>
+> 항상 env var 사용:
+> - `clmux-gemini -m "$CLMUX_GEMINI_MODEL_PRO"` (3.1 Pro)
+> - `clmux-gemini -m "$CLMUX_GEMINI_MODEL_FLASH"` (3 Flash)
+>
+> 또한 Naming Convention의 `<task>-gemini-<pro|flash>` (예: `research-gemini-pro`)는 **agent name suffix**이며 **model ID 아님** — 시각적 유사성으로 인한 혼동 주의.
+
 ## Phase별 역할 상세
 
 ### P1 SPEC — 선행 리서치
@@ -102,11 +112,12 @@ SendMessage(to: "apispec-gemini-pro", message:
 
 - **Spawn 명령**: `clmux-gemini`
 - **기본 agent 이름**: `gemini-worker` (standalone fallback) — clmux-teams 워크플로에서는 task-aware naming 필수 (예: `research-gemini-pro`, `frontend-gemini-flash`). [clmux-teams §Naming Convention](../SKILL.md#naming-convention-필수) 참조
+- **고유 플래그**: `--yolo` (= `--approval-mode=yolo`) — 모든 도구 자동 승인; CLI가 Docker sandbox(`gemini-cli-sandbox`) 자동 부착
 - **Idle pattern**: `Type your message`
 - **모델 env var**: `$CLMUX_GEMINI_MODEL_PRO` (pro-preview 최신), `$CLMUX_GEMINI_MODEL_FLASH` (flash-preview 최신) — clmux.zsh 소스 시 설치된 CLI 번들에서 자동 resolve
 - **모델 지정**: `clmux-gemini -t <team> -m $CLMUX_GEMINI_MODEL_PRO`
 
-> Spawn/Stop/에러 대응 공통 절차는 [SKILL.md §8](../SKILL.md#8-bridge-공통-사항) 참조.
+> Spawn/Stop/에러 대응 공통 절차는 [SKILL.md §9](../SKILL.md#9-bridge-공통-사항) 참조.
 
 [^gemini-1m-context]: DeepMind Model Card, "Gemini 3.1 Pro" (2026-02-19), https://deepmind.google/models/model-cards/gemini-3-1-pro/ — 1M token input context, 64K output.
 [^gemini-arc-agi2]: DeepMind Model Card + Google Blog, "Gemini 3.1 Pro" (2026-02-19), https://deepmind.google/models/model-cards/gemini-3-1-pro/ — ARC-AGI-2: 77.1% (ARC Prize Verified). Predecessor Gemini 3 Pro scored ~31%.

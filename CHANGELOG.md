@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — 2026-04-24
+
+### Changed
+- **Teammate CLI flag hardening.** 3 bridge wrapper 의 기본 실행 플래그를 자율 실행 친화 모드로 표준화:
+  - `gemini` → `gemini --yolo` (CLI 가 Docker sandbox 자동 부착)
+  - `codex -a never` → `codex --full-auto` (shell network-disabled + approval-on-request)
+  - `copilot --yolo` → `copilot --yolo --autopilot --max-autopilot-continues 10` (continuation 상한으로 무한 루프 방지)
+  - 영향 파일: `lib/launcher.zsh`, `lib/teammate-wrappers.zsh`.
+- **`skills/clmux-teams/` 리프레시.** Naming convention (`<task>-<provider>` 패턴 의무화), Provider 고유 제약사항 신규 섹션, 역할별 능력 매트릭스 갱신 (파일 수정 범위 provider 별 명시), Cross-Provider VETO Rule 3 해설 확장. `references/clmux-{codex,copilot,gemini}.md` 도 동시 갱신. `skills/clmux-codex/SKILL.md` 에 Naming Convention 교차 참조 추가.
+- **`docs/superpowers/` → `.claude/` 이전.** Implementation plan 과 design spec 은 process artifact 로 재분류하여 로컬 전용 (`.claude/` gitignored) 으로 이동. Public `docs/` 는 사용자 가이드 (`*-teammate.md`, `pipeline.md`, `troubleshooting.md` 등) + bug fix investigations (`investigations/`) + README-referenced assets (`screenshots/`) 로 한정.
+  - `docs/superpowers/plans/2026-04-16-teammate-parity-monitoring.md` → `.claude/plans/`
+  - `docs/superpowers/specs/2026-04-23-bridge-enforcement-design.md` → `.claude/specs/`
+  - 빈 `docs/superpowers/` 디렉터리 삭제
+- **`scripts/_events.py` docstring 경로 업데이트** — 이동된 plan 문서 참조를 `.claude/plans/2026-04-16-teammate-parity-monitoring.md` 로 교정.
+
 ## Unreleased — 2026-04-19
 
 ### Removed

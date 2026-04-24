@@ -1,8 +1,7 @@
 """Append-only JSONL event log for teammate lifecycle observability.
 
-Schema: one JSON object per line. See
-.claude/plans/2026-04-16-teammate-parity-monitoring.md
-"Event Schema" section.
+Schema: one JSON object per line. Canonical domain defined inline below —
+see `ALLOWED_EVENTS`, `ALLOWED_SOURCES`, and the `record` dict in `emit()`.
 """
 import datetime
 import json
@@ -65,7 +64,8 @@ def emit(
     """Append one canonical event to ~/.claude/clmux/events.jsonl.
 
     Unknown event/source raise EventSchemaError. All other fields
-    accept None (null in JSON). See plan "Event Schema" for semantics.
+    accept None (null in JSON). See ALLOWED_EVENTS / ALLOWED_SOURCES
+    (above) and the `record` dict (below) for the full schema.
     """
     if event not in ALLOWED_EVENTS:
         raise EventSchemaError(f"unknown event: {event!r}")

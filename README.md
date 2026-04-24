@@ -240,7 +240,7 @@ clmux-copilot-stop -t <team_name>
 
 자세한 내용은 [Copilot Teammate 상세](docs/copilot-teammate.md)를 참고하세요.
 
-> **참고**: `clmux -c`로 스폰 시 `copilot --yolo` 플래그, `clmux-copilot`으로 스폰 시 `copilot --allow-all-tools` 플래그가 사용됩니다.
+> **참고**: `clmux -c` 및 `clmux-copilot` 모두 `copilot --yolo --autopilot --max-autopilot-continues 10` 플래그 사용. `--autopilot` 와 `--max-autopilot-continues` 는 **Copilot CLI 최신 버전** 에서 지원 — 구버전 에서는 spawn 실패 가능. `copilot --version` 확인 후 최신판으로 업그레이드 권장.
 
 > **모델 호환성 (2026-04 기준)**: GitHub이 `gpt-5.1` 계열을 deprecate(2026-04-01)했고, `claude-sonnet-4.5` 도 백엔드 400 에러로 사용 불가 ([copilot-cli#2597](https://github.com/github/copilot-cli/issues/2597)). Copilot 시작 시 `model_not_supported` 에러가 발생하면 `~/.copilot/config.json` 의 `model` 을 `claude-sonnet-4.6`, `gpt-5.3-codex`, 또는 `gemini-3-pro-preview` 등 [지원 모델](https://docs.github.com/en/copilot/reference/ai-models/supported-models) 로 변경하세요.
 
@@ -300,7 +300,7 @@ SendMessage(to: "copilot-worker", message: "...")
 - iTerm2 (다른 터미널도 동작하나 iTerm2 기준으로 검증)
 - Gemini CLI (`gemini`) — Gemini teammate 사용 시
 - Codex CLI (`codex`) — Codex teammate 사용 시
-- Copilot CLI (`copilot`) — Copilot teammate 사용 시
+- Copilot CLI (`copilot`) — Copilot teammate 사용 시. `--autopilot` / `--max-autopilot-continues` 플래그 지원 버전 필요 (미지원 구버전에서는 spawn 실패). `copilot --version` 으로 확인.
 - Node.js / npm — MCP 서버 (`npx clau-mux-bridge`) 실행 시
 - `curl` — Copilot MCP 서버 헬스체크 시
 - Python 3 — bridge 헬퍼 스크립트 실행 시

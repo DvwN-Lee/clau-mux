@@ -2,7 +2,18 @@
 
 ## Unreleased — 2026-04-24
 
-### Changed
+### Fixed (bridge hardening — commits eca1a4d..f4b1352)
+- **Spawn guard + per-team Codex isolation** (`eca1a4d`, `f300dd8`) — 중복 spawn 방지 + `<team-dir>/.codex-home` 하위로 Codex 설정 격리. 공용 `~/.codex/config.toml` overwrite race 해소. Gemini model env vars (`CLMUX_GEMINI_MODEL_PRO` / `_FLASH`) 도입.
+- **team-gated `write_to_lead`** (`f300dd8`) — 현재 lead session 에 등록된 team 맥락에서만 outbox write 허용. 미활성 team 에 대한 stale inbox 오염 차단.
+- **`approval_mode` 교정 + Codex auth symlink allowlist** (`a8ca970`) — approval mode 를 `on-request` 로 정정, `.codex-home` 의 auth symlink 화이트리스트화.
+- **trust-before-setup + stale launcher call drop** (`95f580f`) — spawn 순서 교정: MCP setup 전에 trust 단계 실행. 구 경로 launcher 호출 제거.
+- **race-safe npx symlink + cache caveat 문서화** (`f4b1352`) — `npx clau-mux-bridge` 재실행 시 race-free symlink 치환. npx cache 동기 주의사항 명시.
+
+### Docs (Cross-Provider VETO protocol — commits 3124efc..6ec389d)
+- **Anthropic teammate 금지 원칙 명문화** (`6ec389d`) — `skills/clmux-teams/SKILL.md` 에 "Anthropic teammate (TeamCreate 멤버) 금지, Lead/Subagent 에서만 사용" 규칙 추가. Cross-Provider VETO 와 함께 Rule 3 (비-Claude ≥1개 독립 지지 + 교차 검증 증거) 해설.
+- **bridge-enforcement design spec** (`3124efc`) — `write_to_lead` team-gating 설계 문서. 본 PR 의 마지막 commit (`0dbef11`) 에서 process artifact 정책에 따라 `.claude/specs/` 로 이전됨.
+
+### Changed (this commit — `0dbef11`)
 - **Teammate CLI flag hardening.** 3 bridge wrapper 의 기본 실행 플래그를 자율 실행 친화 모드로 표준화:
   - `gemini` → `gemini --yolo` (CLI 가 Docker sandbox 자동 부착)
   - `codex -a never` → `codex --full-auto` (shell network-disabled + approval-on-request)

@@ -24,7 +24,7 @@
   - `docs/superpowers/plans/2026-04-16-teammate-parity-monitoring.md` → `.claude/plans/`
   - `docs/superpowers/specs/2026-04-23-bridge-enforcement-design.md` → `.claude/specs/`
   - 빈 `docs/superpowers/` 디렉터리 삭제
-- **`scripts/_events.py` docstring 경로 업데이트** — 이동된 plan 문서 참조를 `.claude/plans/2026-04-16-teammate-parity-monitoring.md` 로 교정.
+- **`scripts/_events.py` docstring 정리** — 외부 plan 경로 참조 제거, inline `ALLOWED_EVENTS` / `ALLOWED_SOURCES` + `record` dict 참조로 교체. Public repo 에서 dead reference 해소.
 
 ## Unreleased — 2026-04-19
 

@@ -4,7 +4,7 @@ if _clmux_agent_enabled gemini; then
   clmux-gemini() {
     # Spawns a Gemini CLI tmux pane as a Claude Code teammate.
     # Usage: clmux-gemini -t <team_name> [-n <agent_name>] [-x <timeout_sec>] [-m <model>]
-    _clmux_spawn_agent gemini gemini-worker "Type your message" paste 0 colour33 1 "$@"
+    _clmux_spawn_agent "gemini --yolo" gemini-worker "Type your message" paste 0 colour33 1 "$@"
   }
 
   clmux-gemini-stop() {
@@ -18,7 +18,7 @@ if _clmux_agent_enabled codex; then
   clmux-codex() {
     # Spawns a Codex CLI tmux pane as a Claude Code teammate.
     # Usage: clmux-codex -t <team_name> [-n <agent_name>] [-x <timeout_sec>] [-m <model>]
-    _clmux_spawn_agent "codex -a never" codex-worker "^[[:space:]]*›" paste 1 colour36 0 "$@"
+    _clmux_spawn_agent "codex --full-auto" codex-worker "^[[:space:]]*›" paste 1 colour36 0 "$@"
   }
 
   clmux-codex-stop() {
@@ -78,7 +78,7 @@ if _clmux_agent_enabled copilot; then
     # Register URL in Copilot mcp-config.json
     python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${port}/sse"
 
-    _clmux_spawn_agent "copilot --allow-all-tools" copilot-worker "/ commands" paste 1 colour98 0 "$@"
+    _clmux_spawn_agent "copilot --yolo --autopilot --max-autopilot-continues 10" copilot-worker "/ commands" paste 1 colour98 0 "$@"
   }
 
   clmux-copilot-stop() {

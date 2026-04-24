@@ -145,10 +145,14 @@ SendMessage(to: "pr-ops-copilot", message:
 
 - **Spawn 명령**: `clmux-copilot`
 - **기본 agent 이름**: `copilot-worker` (standalone fallback) — clmux-teams 워크플로에서는 task-aware naming 필수 (예: `pr-review-copilot`, `pr-ops-copilot`, `audit-copilot`). [clmux-teams §Naming Convention](../SKILL.md#naming-convention-필수) 참조
-- **실행 모드**: `copilot --allow-all-tools`
+- **실행 모드**: `copilot --yolo --autopilot --max-autopilot-continues 10`
+- **플래그 의미**:
+  - `--yolo` (= `--allow-all`): 모든 도구·경로·URL 자동 승인
+  - `--autopilot`: 단일 지시에서 다단계 자율 실행 루프 활성화 (기본은 단계마다 정지)
+  - `--max-autopilot-continues 10`: 무한 루프 방지 — continuation 최대 10회 제한
 - **Idle pattern**: `/ commands`
 - **모델**: `GPT-5.3-Codex` (Copilot CLI 기본, 본 팀 정책상 **고정** — `-m` 지정 금지. 상세: §라우팅 모델 정책)
 - **MCP 서버**: HTTP/SSE 모드 — `bridge-mcp-server.js --http <port>` + `~/.copilot/mcp-config.json` 등록
 - **Env file**: Copilot이 MCP subprocess에서 env를 클리어하므로 `.bridge-copilot-worker.env` 작성
 
-> Spawn/Stop/에러 대응 공통 절차는 [SKILL.md §8](../SKILL.md#8-bridge-공통-사항) 참조.
+> Spawn/Stop/에러 대응 공통 절차는 [SKILL.md §9](../SKILL.md#9-bridge-공통-사항) 참조.

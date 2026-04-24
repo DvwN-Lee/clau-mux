@@ -1,7 +1,7 @@
 """Append-only JSONL event log for teammate lifecycle observability.
 
 Schema: one JSON object per line. See
-docs/superpowers/plans/2026-04-16-teammate-parity-monitoring.md
+.claude/plans/2026-04-16-teammate-parity-monitoring.md
 "Event Schema" section.
 """
 import datetime

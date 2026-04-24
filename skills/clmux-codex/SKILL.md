@@ -83,7 +83,7 @@ zsh -ic "clmux-codex-stop -t <team_name>"
 ## Codex-specific Notes
 
 - **Paste mode**: Codex TUI requires `tmux paste-buffer` instead of `send-keys` for text input.
-- **Env file**: Codex CLI runs `env_clear()` on MCP subprocesses. The bridge writes `~/.claude/teams/<team_name>/.bridge-codex-worker.env` so the MCP server can find `CLMUX_OUTBOX` and `CLMUX_AGENT`.
+- **Env file**: Codex CLI runs `env_clear()` on MCP subprocesses. The bridge writes `~/.claude/teams/<team_name>/.bridge-<agent_name>.env` (예: `.bridge-security-codex.env`) so the MCP server can find `CLMUX_OUTBOX` and `CLMUX_AGENT`.
 - **AGENTS.md**: Codex reads `AGENTS.md` (not CODEX.md) for project instructions including `write_to_lead` usage.
 - **Idle pattern**: Bridge waits for `^[[:space:]]*›` before delivering queued messages.
 

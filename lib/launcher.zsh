@@ -65,14 +65,14 @@ clmux() {
 
     if [[ "$gemini_flag" -eq 1 ]] && _clmux_agent_enabled gemini; then
       _clmux_ensure_team "$_team_dir" "$_team"
-      _clmux_spawn_agent gemini gemini-worker "Type your message" paste 0 colour33 1 -t "$_team"
+      _clmux_spawn_agent "gemini --yolo" gemini-worker "Type your message" paste 0 colour33 1 -t "$_team"
     fi
     if [[ "$codex_flag" -eq 1 ]] && _clmux_agent_enabled codex; then
       _clmux_ensure_team "$_team_dir" "$_team"
       # setup_codex_mcp.py is now called by _clmux_spawn_agent with the
       # required --home <team-dir>/.codex-home; calling it here without
       # --home would exit(2) under the new per-team isolation model.
-      _clmux_spawn_agent "codex -a never" codex-worker "^[[:space:]]*›" paste 1 colour36 0 -t "$_team"
+      _clmux_spawn_agent "codex --full-auto" codex-worker "^[[:space:]]*›" paste 1 colour36 0 -t "$_team"
     fi
     if [[ "$copilot_flag" -eq 1 ]] && _clmux_agent_enabled copilot; then
       local _cp_outbox="$_team_dir/inboxes/team-lead.json"
@@ -91,7 +91,7 @@ clmux() {
         sleep 0.2
       done
       python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${_cp_port}/sse"
-      _clmux_spawn_agent "copilot --yolo" copilot-worker "/ commands" paste 1 colour98 0 -t "$_team"
+      _clmux_spawn_agent "copilot --yolo --autopilot --max-autopilot-continues 10" copilot-worker "/ commands" paste 1 colour98 0 -t "$_team"
     fi
     command claude "${clmux_args[@]}"
     return
@@ -168,7 +168,7 @@ clmux() {
     _clmux_ensure_team "$_st_dir" "$_st_team"
     [[ ! -f "$_st_inbox_dir/gemini-worker.json" ]] && echo '[]' > "$_st_inbox_dir/gemini-worker.json"
     [[ ! -f "$_st_inbox_dir/team-lead.json" ]]    && echo '[]' > "$_st_inbox_dir/team-lead.json"
-    _clmux_spawn_agent_in_session "$session_name" gemini gemini-worker "Type your message" paste 0 colour33 1 "$_st_team"
+    _clmux_spawn_agent_in_session "$session_name" "gemini --yolo" gemini-worker "Type your message" paste 0 colour33 1 "$_st_team"
   fi
 
   if [[ "$codex_flag" -eq 1 ]] && _clmux_agent_enabled codex; then
@@ -178,7 +178,7 @@ clmux() {
     # setup_codex_mcp.py is now called by _clmux_spawn_agent_in_session with
     # the required --home <team-dir>/.codex-home; calling it here without
     # --home would exit(2) under the new per-team isolation model.
-    _clmux_spawn_agent_in_session "$session_name" "codex -a never" codex-worker "^[[:space:]]*›" paste 1 colour36 0 "$_st_team"
+    _clmux_spawn_agent_in_session "$session_name" "codex --full-auto" codex-worker "^[[:space:]]*›" paste 1 colour36 0 "$_st_team"
   fi
 
   if [[ "$copilot_flag" -eq 1 ]] && _clmux_agent_enabled copilot; then
@@ -199,7 +199,7 @@ clmux() {
       sleep 0.2
     done
     python3 "$CLMUX_DIR/scripts/setup_copilot_mcp.py" "http://127.0.0.1:${_cp2_port}/sse"
-    _clmux_spawn_agent_in_session "$session_name" "copilot --yolo" copilot-worker "/ commands" paste 1 colour98 0 "$_st_team"
+    _clmux_spawn_agent_in_session "$session_name" "copilot --yolo --autopilot --max-autopilot-continues 10" copilot-worker "/ commands" paste 1 colour98 0 "$_st_team"
   fi
 
   tmux attach-session -t "=$session_name"

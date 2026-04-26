@@ -19,9 +19,9 @@ Claude Code를 tmux 세션으로 격리하고, Gemini / Codex / Copilot을 teamm
 - **tmux 테마**: 커스텀 상태바, 마우스 토글, copy mode
 - **플러그인 자동 로드**: `CLMUX_PLUGIN_DIR` 설정 시 유효한 플러그인을 Claude Code에 `--plugin-dir`로 전달
 
-## UX: 사용자가 쓰는 흐름
+## How to Use
 
-이 섹션은 사람이 터미널에서 직접 실행하는 명령만 다룹니다. teammate spawn, mailbox, MCP bridge, `SendMessage` 같은 내부 작업은 아래 AX 섹션에서 다룹니다.
+이 섹션은 사용자가 터미널에서 직접 실행할 명령과 Claude Code 프롬프트에 입력할 요청만 다룹니다. teammate 실행, mailbox, MCP bridge, `SendMessage` 같은 내부 처리는 agent가 맡습니다.
 
 ### 설치
 
@@ -89,14 +89,31 @@ clmux -n refactor -gcx -T refactor-team
 
 ### 자연어로 teammate 사용
 
-세션이 시작된 뒤에는 Claude Code에게 자연어로 teammate 작업을 요청합니다.
+세션이 시작되면 Claude Code에게 자연어로 teammate 작업을 요청합니다.
 
 - "Gemini에게 이 설계를 리서치 관점에서 검토시켜줘."
 - "Codex에게 구현 대안을 하나 맡기고 차이를 비교해줘."
 - "Copilot에게 PR 리뷰 관점으로 위험한 변경을 찾아달라고 해줘."
 - "Gemini와 Codex 양쪽 의견을 받아서 합의안을 정리해줘."
 
-사용자는 보통 `TeamCreate(...)`나 `SendMessage(...)`를 직접 실행하지 않습니다. Claude lead와 clau-mux automation이 필요한 내부 라우팅을 처리합니다.
+사용자는 보통 `TeamCreate(...)`나 `SendMessage(...)`를 직접 실행하지 않습니다. 필요한 라우팅은 Claude lead와 clau-mux 자동화가 처리합니다.
+
+### Skill로 진단 요청
+
+Teammate 상태 확인이나 ping test도 같은 방식으로 요청합니다. 사용자는 내부 진단 명령을 직접 고르지 않고, Claude Code 프롬프트에서 clmux skill을 로드한 뒤 원하는 작업을 말하면 됩니다.
+
+```text
+/clmux-teams
+이를 기반으로 ping test 진행해줘.
+```
+
+또는 한 번에 요청할 수 있습니다.
+
+```text
+/clmux-teams 현재 team 기준으로 teammates ping test 진행해줘.
+```
+
+이 요청을 받으면 agent가 팀 상태를 확인하고 필요한 진단 명령을 선택해 실행합니다. `clmux-teammates`, `clmux-team-inspect`, `clmux-teammate-check` 같은 명령은 사용자가 직접 조합하기보다 agent가 상황에 맞게 처리하는 대상입니다.
 
 ### 세션 확인과 정리
 
@@ -146,7 +163,7 @@ bash ~/clau-mux/scripts/remove.sh copilot
 bash ~/clau-mux/scripts/remove.sh all
 ```
 
-## UX 명령어 요약
+## Command Summary
 
 | 명령 | 설명 |
 | --- | --- |
@@ -162,11 +179,21 @@ bash ~/clau-mux/scripts/remove.sh all
 | `clmux-teammates` | 현재 세션의 teammate 목록 표시 |
 | `clmux-cleanup` | orphaned 세션 일괄 제거 |
 
-## AX: Agent-Managed Runtime
+## How Agents Handle Requests
 
-이 섹션은 Claude lead, hooks, skills, bridge automation이 사용하는 내부 계약입니다. 사용자가 직접 실행할 수는 있지만, 일반적인 사용 흐름에서는 Claude에게 자연어로 요청하면 됩니다.
+이 섹션은 사용자의 요청을 받은 agent가 clau-mux를 어떻게 다루는지 설명합니다. 사용자는 `/clmux-teams` 같은 skill을 로드해 목표를 말하고, agent는 팀 상태 확인, teammate 추가, ping test, 복구, 메시지 라우팅을 직접 판단해 처리합니다.
 
-### 아키텍처
+### 요청 처리 순서
+
+1. 사용자가 Claude Code 프롬프트에서 skill을 로드하고 목표를 말합니다.
+2. Agent가 현재 tmux 세션과 team 상태를 확인합니다.
+3. 필요한 teammate가 없거나 비활성 상태이면 wrapper로 추가하거나 재시작합니다.
+4. 작업 요청은 Claude lead의 team tool이나 bridge mailbox를 통해 teammate에게 전달합니다.
+5. Teammate 응답은 MCP bridge를 거쳐 lead로 돌아오며, agent가 결과를 요약하거나 다음 조치를 이어갑니다.
+
+예를 들어 사용자가 `/clmux-teams 현재 team 기준으로 teammates ping test 진행해줘.`라고 요청하면, agent는 team을 식별하고 teammate 목록을 확인한 뒤 필요한 liveness check를 실행합니다. 사용자는 어떤 진단 명령을 어떤 순서로 실행할지 지정하지 않아도 됩니다.
+
+### 런타임 구조
 
 ```mermaid
 flowchart LR
@@ -211,9 +238,9 @@ flowchart LR
 
 에이전트별 inbox는 lead가 teammate에게 보낼 메시지를 담고, `team-lead.json`은 teammate가 lead에게 돌려보내는 공용 outbox입니다.
 
-### Teammate wrapper
+### Teammate 준비
 
-AX에서 teammate를 추가하거나 재시작해야 할 때 사용하는 wrapper입니다.
+Agent가 teammate를 추가하거나 재시작해야 할 때는 provider별 wrapper를 사용합니다.
 
 ```bash
 # Gemini
@@ -242,9 +269,9 @@ zsh -ic "clmux-copilot -t <team>"
 
 Provider별 세부 사항은 [Gemini Teammate 상세](docs/gemini-teammate.md), [Codex Teammate 상세](docs/codex-teammate.md), [Copilot Teammate 상세](docs/copilot-teammate.md)를 참고하세요.
 
-### Agent tool routing
+### 메시지 라우팅
 
-Claude lead는 필요할 때 팀을 만들고 teammate에게 메시지를 보냅니다.
+Claude lead는 필요할 때 팀을 만들고 teammate에게 메시지를 보냅니다. 사용자가 직접 호출하는 API가 아니라 agent가 요청 처리 중 사용하는 내부 경로입니다.
 
 ```text
 TeamCreate(team_name: "<team>")
@@ -255,9 +282,9 @@ SendMessage(to: "copilot-worker", message: "...")
 
 Wrapper가 teammate pane과 bridge를 준비하고, teammate는 MCP 도구 `clau_mux_bridge.write_to_lead`를 통해 lead에게 응답합니다. Copilot은 HTTP/SSE 기반 MCP 서버 경로를 사용합니다.
 
-### Diagnostics
+### 진단과 복구
 
-AX 진단과 복구에 쓰는 단일 진입점입니다.
+Agent는 teammate 상태를 진단하거나 복구할 때 아래 명령을 사용합니다. 사용자는 보통 이 명령을 직접 실행하지 않고, `/clmux-teams`를 로드한 뒤 "ping test 진행해줘", "응답 없는 teammate를 진단해줘"처럼 요청합니다.
 
 | 명령 | 설명 |
 | --- | --- |
@@ -266,7 +293,7 @@ AX 진단과 복구에 쓰는 단일 진입점입니다.
 | `clmux-teammate-check --team <team> --to <agent>` | teammate liveness ping |
 | `clmux-send --to <pane> --prompt '<text>' [--clear --no-enter --wait-idle --timeout <sec> --force]` | raw send-keys 대신 structured prompt 송부 |
 
-### Runtime notes
+### 내부 동작 참고
 
 - `clmux-bridge.zsh`는 큰 메시지(>300자)를 300자 단위 청크로 나누어 `paste-buffer`로 전달합니다. macOS PTY 버퍼 한계로 단일 paste 이벤트가 잘릴 수 있기 때문입니다.
 - Codex는 짧은 conversational 메시지에서 `write_to_lead` 호출을 생략하는 경향이 있어, Codex 전용으로 paste 직전 `[Bridge message - reply via write_to_lead]` prefix를 자동 추가합니다.

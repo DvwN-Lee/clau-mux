@@ -1,6 +1,6 @@
 # clau-mux
 
-Claude Code를 tmux 세션으로 격리하고, Gemini / Codex / Copilot을 teammate로 붙여 쓰는 macOS용 런타임입니다.
+Claude Code를 tmux 세션으로 격리하고, Gemini / Codex / Copilot을 teammate로 붙여 쓰는 macOS용 settings.
 
 > **macOS 전용** — macOS + iTerm2 + zsh 환경을 기준으로 개발 및 검증되었습니다.
 
